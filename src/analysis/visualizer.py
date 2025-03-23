@@ -1,5 +1,6 @@
 """
-Module for creating visualizations of fantasy football data
+Modified module for creating visualizations of fantasy football data
+with improved organization by position and analysis type
 """
 
 import pandas as pd
@@ -30,9 +31,9 @@ class FantasyDataVisualizer:
         -----------
         data_dict : dict
             Dictionary containing various dataframes of player data
-        feature_sets : dict, optional
+        feature_sets : dict
             Dictionary containing engineered feature sets
-        output_dir : str, optional
+        output_dir : str
             Directory to save visualizations
         """
         self.data_dict = data_dict
@@ -40,18 +41,7 @@ class FantasyDataVisualizer:
         self.output_dir = output_dir
         
         # Create organized visualization directories
-        self.viz_dirs = {
-            'eda': os.path.join(output_dir, 'exploratory_analysis'),
-            'players': os.path.join(output_dir, 'player_analysis'),
-            'positions': os.path.join(output_dir, 'position_analysis'),
-            'trends': os.path.join(output_dir, 'trends_analysis'),
-            'clusters': os.path.join(output_dir, 'clustering'),
-            'advanced': os.path.join(output_dir, 'advanced_analytics'),
-            'league': os.path.join(output_dir, 'league_settings')
-        }
-        
-        for dir_path in self.viz_dirs.values():
-            os.makedirs(dir_path, exist_ok=True)
+        self._create_visualization_dirs()
         
         # Set visualization style
         plt.style.use('seaborn-v0_8-whitegrid')
@@ -84,6 +74,40 @@ class FantasyDataVisualizer:
         
         logger.info(f"Initialized data visualizer with {len(data_dict)} datasets")
     
+    def _create_visualization_dirs(self):
+        """Create organized visualization directory structure"""
+        # Positions
+        positions = ['qb', 'rb', 'wr', 'te', 'overall']
+        
+        # Analysis categories
+        categories = [
+            'correlations',
+            'clusters',
+            'feature_importance',
+            'time_trends',
+            'distributions',
+            'league_settings'
+        ]
+        
+        # Create directories for each position and category
+        for position in positions:
+            for category in categories:
+                dir_path = os.path.join(self.output_dir, position, category)
+                os.makedirs(dir_path, exist_ok=True)
+        
+        # Map of analysis types to directories
+        self.viz_dirs = {
+            'eda': 'basic_stats',
+            'players': 'players',
+            'positions': 'position_analysis',
+            'trends': 'time_trends',
+            'clusters': 'clusters',
+            'advanced': 'advanced_analytics',
+            'league': 'league_settings'
+        }
+        
+        logger.info(f"Created organized visualization directory structure")
+    
     def explore_league_settings(self, league_data):
         """
         Visualize league settings
@@ -101,6 +125,9 @@ class FantasyDataVisualizer:
         scoring_settings = league_data.get('scoring_settings', {})
         roster_settings = league_data.get('roster_settings', {})
         league_info = league_data.get('league_info', {})
+        
+        # Output directory
+        league_dir = os.path.join(self.output_dir, 'overall', 'league_settings')
         
         if not scoring_settings and not roster_settings:
             logger.warning("No league settings to visualize")
@@ -150,7 +177,7 @@ class FantasyDataVisualizer:
                 plt.tight_layout()
                 
                 # Save figure
-                plt.savefig(os.path.join(self.viz_dirs['league'], 'scoring_settings.png'))
+                plt.savefig(os.path.join(league_dir, 'scoring_settings.png'))
                 plt.close()
         
         # Create roster settings visualization
@@ -202,7 +229,7 @@ class FantasyDataVisualizer:
                 plt.tight_layout()
                 
                 # Save figure
-                plt.savefig(os.path.join(self.viz_dirs['league'], 'roster_settings.png'))
+                plt.savefig(os.path.join(league_dir, 'roster_settings.png'))
                 plt.close()
         
         # Create league summary table
@@ -250,7 +277,7 @@ class FantasyDataVisualizer:
         plt.tight_layout()
         
         # Save figure
-        plt.savefig(os.path.join(self.viz_dirs['league'], 'league_summary.png'))
+        plt.savefig(os.path.join(league_dir, 'league_summary.png'))
         plt.close()
         
         logger.info("League settings visualizations created")
@@ -304,6 +331,9 @@ class FantasyDataVisualizer:
             logger.warning("No fantasy_points column in data")
             return
         
+        # Output directory
+        dist_dir = os.path.join(self.output_dir, 'overall', 'distributions')
+        
         # Create violin plot of fantasy points by position
         plt.figure(figsize=(12, 8))
         
@@ -336,7 +366,7 @@ class FantasyDataVisualizer:
                       bbox=dict(facecolor='white', alpha=0.8, edgecolor='lightgray'))
         
         plt.tight_layout()
-        plt.savefig(os.path.join(self.viz_dirs['eda'], 'fantasy_points_by_position.png'))
+        plt.savefig(os.path.join(dist_dir, 'fantasy_points_violin.png'))
         plt.close()
         
         # Create a box plot version
@@ -356,7 +386,7 @@ class FantasyDataVisualizer:
         plt.ylabel('Fantasy Points', fontsize=14)
         
         plt.tight_layout()
-        plt.savefig(os.path.join(self.viz_dirs['eda'], 'fantasy_points_box_by_position.png'))
+        plt.savefig(os.path.join(dist_dir, 'fantasy_points_box.png'))
         plt.close()
         
         # Create a KDE plot version
@@ -376,7 +406,7 @@ class FantasyDataVisualizer:
         plt.legend(title='Position')
         
         plt.tight_layout()
-        plt.savefig(os.path.join(self.viz_dirs['eda'], 'fantasy_points_density_by_position.png'))
+        plt.savefig(os.path.join(dist_dir, 'fantasy_points_density.png'))
         plt.close()
         
         logger.info("Fantasy points distribution visualizations created")
@@ -401,6 +431,9 @@ class FantasyDataVisualizer:
             logger.warning("No data after filtering for age distribution")
             return
         
+        # Output directory
+        dist_dir = os.path.join(self.output_dir, 'overall', 'distributions')
+        
         # Create histogram
         plt.figure(figsize=(12, 8))
         
@@ -422,7 +455,7 @@ class FantasyDataVisualizer:
         plt.xlim(20, 40)
         
         plt.tight_layout()
-        plt.savefig(os.path.join(self.viz_dirs['eda'], 'age_distribution_by_position.png'))
+        plt.savefig(os.path.join(dist_dir, 'age_distribution.png'))
         plt.close()
         
         # Create boxplot version
@@ -442,8 +475,24 @@ class FantasyDataVisualizer:
         plt.ylabel('Age', fontsize=14)
         
         plt.tight_layout()
-        plt.savefig(os.path.join(self.viz_dirs['eda'], 'age_box_by_position.png'))
+        plt.savefig(os.path.join(dist_dir, 'age_box.png'))
         plt.close()
+        
+        # Also save position-specific age distributions
+        for pos in ['QB', 'RB', 'WR', 'TE']:
+            pos_data = filtered_data[filtered_data['position'] == pos]
+            if not pos_data.empty:
+                pos_dir = os.path.join(self.output_dir, pos.lower(), 'distributions')
+                
+                plt.figure(figsize=(10, 6))
+                sns.histplot(pos_data['age'], kde=True, color=self.positions_palette.get(pos))
+                plt.title(f'Age Distribution for {pos}', fontsize=16, pad=20)
+                plt.xlabel('Age', fontsize=14)
+                plt.ylabel('Count', fontsize=14)
+                plt.xlim(20, 40)
+                plt.tight_layout()
+                plt.savefig(os.path.join(pos_dir, 'age_distribution.png'))
+                plt.close()
         
         logger.info("Age distribution visualizations created")
     
@@ -458,6 +507,9 @@ class FantasyDataVisualizer:
         position : str
             Position name
         """
+        # Output directory
+        pos_dir = os.path.join(self.output_dir, position.lower(), 'distributions')
+        
         # Select key stats based on position
         if position == 'QB':
             key_stats = ['passing_yards', 'passing_tds', 'interceptions', 'rushing_yards']
@@ -507,7 +559,7 @@ class FantasyDataVisualizer:
                           label=f'Avg: {avg:.1f}')
                 
                 # Add title and labels
-                plt.title(f'{stat.replace("_", " ").title()} Distribution - {position}')
+                plt.title(f'{stat.replace("_", " ").title()} Distribution')
                 plt.xlabel(stat.replace('_', ' ').title())
                 plt.ylabel('Count')
                 plt.legend()
@@ -518,8 +570,32 @@ class FantasyDataVisualizer:
                        fontsize=14)
         
         plt.tight_layout()
-        plt.savefig(os.path.join(self.viz_dirs['positions'], f'{position.lower()}_stat_distributions.png'))
+        plt.savefig(os.path.join(pos_dir, 'stat_distributions.png'))
         plt.close()
+        
+        # Create individual distribution plots
+        for stat in available_stats:
+            # Filter out zeros for better visualization
+            stat_data = pos_data[pos_data[stat] > 0][stat]
+            
+            if len(stat_data) > 0:
+                plt.figure(figsize=(10, 6))
+                sns.histplot(stat_data, kde=True, color=self.positions_palette.get(position))
+                
+                # Add stat average as vertical line
+                avg = stat_data.mean()
+                plt.axvline(avg, color='red', linestyle='--', 
+                          label=f'Avg: {avg:.1f}')
+                
+                # Add title and labels
+                plt.title(f'{stat.replace("_", " ").title()} Distribution for {position}')
+                plt.xlabel(stat.replace('_', ' ').title())
+                plt.ylabel('Count')
+                plt.legend()
+                
+                plt.tight_layout()
+                plt.savefig(os.path.join(pos_dir, f'{stat}_distribution.png'))
+                plt.close()
         
         logger.info(f"{position} distribution visualizations created")
     
@@ -543,6 +619,9 @@ class FantasyDataVisualizer:
             logger.warning("No data after filtering for games distribution")
             return
         
+        # Output directory
+        overall_dir = os.path.join(self.output_dir, 'overall', 'distributions')
+        
         # Create histogram
         plt.figure(figsize=(12, 8))
         
@@ -561,7 +640,7 @@ class FantasyDataVisualizer:
         plt.legend(title='Position')
         
         plt.tight_layout()
-        plt.savefig(os.path.join(self.viz_dirs['eda'], 'games_distribution_by_position.png'))
+        plt.savefig(os.path.join(overall_dir, 'games_distribution.png'))
         plt.close()
         
         # Create durability visualization if seasons_in_league exists
@@ -596,7 +675,7 @@ class FantasyDataVisualizer:
             
             plt.grid(True, alpha=0.3)
             plt.tight_layout()
-            plt.savefig(os.path.join(self.viz_dirs['eda'], 'career_durability.png'))
+            plt.savefig(os.path.join(overall_dir, 'career_durability.png'))
             plt.close()
         
         logger.info("Games played distribution visualizations created")
@@ -659,6 +738,9 @@ class FantasyDataVisualizer:
             logger.warning("No trend data after filtering")
             return
         
+        # Output directory
+        trend_dir = os.path.join(self.output_dir, 'overall', 'time_trends')
+        
         # Create line plot for average fantasy points
         plt.figure(figsize=(12, 8))
         
@@ -682,7 +764,7 @@ class FantasyDataVisualizer:
         plt.grid(True, alpha=0.3)
         
         plt.tight_layout()
-        plt.savefig(os.path.join(self.viz_dirs['trends'], 'fantasy_points_trend.png'))
+        plt.savefig(os.path.join(trend_dir, 'fantasy_points_trend.png'))
         plt.close()
         
         # Create line plot for median fantasy points
@@ -708,7 +790,7 @@ class FantasyDataVisualizer:
         plt.grid(True, alpha=0.3)
         
         plt.tight_layout()
-        plt.savefig(os.path.join(self.viz_dirs['trends'], 'fantasy_points_median_trend.png'))
+        plt.savefig(os.path.join(trend_dir, 'fantasy_points_median_trend.png'))
         plt.close()
         
         # Create line plot for player count
@@ -734,8 +816,28 @@ class FantasyDataVisualizer:
         plt.grid(True, alpha=0.3)
         
         plt.tight_layout()
-        plt.savefig(os.path.join(self.viz_dirs['trends'], 'player_count_trend.png'))
+        plt.savefig(os.path.join(trend_dir, 'player_count_trend.png'))
         plt.close()
+        
+        # Also save position-specific trends
+        for pos in ['QB', 'RB', 'WR', 'TE']:
+            if pos in trend_data['position'].values:
+                pos_dir = os.path.join(self.output_dir, pos.lower(), 'time_trends')
+                pos_data = trend_data[trend_data['position'] == pos]
+                
+                plt.figure(figsize=(10, 6))
+                plt.plot(pos_data['season'], pos_data['avg_points'], marker='o', label='Average', 
+                       color=self.positions_palette.get(pos))
+                plt.plot(pos_data['season'], pos_data['median_points'], marker='s', linestyle='--', label='Median', 
+                       color=self.positions_palette.get(pos), alpha=0.7)
+                plt.title(f'Fantasy Points Trend for {pos}', fontsize=16, pad=20)
+                plt.xlabel('Season', fontsize=14)
+                plt.ylabel('Fantasy Points', fontsize=14)
+                plt.legend()
+                plt.grid(True, alpha=0.3)
+                plt.tight_layout()
+                plt.savefig(os.path.join(pos_dir, 'fantasy_points_trend.png'))
+                plt.close()
         
         logger.info("Fantasy points trend visualizations created")
     
@@ -750,6 +852,9 @@ class FantasyDataVisualizer:
         position : str
             Position name
         """
+        # Output directory
+        pos_dir = os.path.join(self.output_dir, position.lower(), 'time_trends')
+        
         # Select key stats based on position
         if position == 'QB':
             key_stats = [
@@ -836,7 +941,7 @@ class FantasyDataVisualizer:
             
             # Create safe filename
             safe_filename = stat_col.lower().replace(' ', '_').replace('/', '_')
-            plt.savefig(os.path.join(self.viz_dirs['trends'], f'{position.lower()}_{safe_filename}_trend.png'))
+            plt.savefig(os.path.join(pos_dir, f'{safe_filename}_trend.png'))
             plt.close()
         
         logger.info(f"{position} trend visualizations created")
@@ -876,6 +981,9 @@ class FantasyDataVisualizer:
             logger.warning("No age trend data after filtering")
             return
         
+        # Output directory
+        overall_dir = os.path.join(self.output_dir, 'overall', 'time_trends')
+        
         # Create line plot
         plt.figure(figsize=(12, 8))
         
@@ -911,35 +1019,37 @@ class FantasyDataVisualizer:
         plt.grid(True, alpha=0.3)
         
         plt.tight_layout()
-        plt.savefig(os.path.join(self.viz_dirs['trends'], 'fantasy_points_by_age.png'))
+        plt.savefig(os.path.join(overall_dir, 'fantasy_points_by_age.png'))
         plt.close()
         
-        # Create scatter plot with size based on player count
-        plt.figure(figsize=(14, 10))
-        
+        # Also save position-specific age trends
         for pos in ['QB', 'RB', 'WR', 'TE']:
             if pos in age_trend['position'].values:
+                pos_dir = os.path.join(self.output_dir, pos.lower(), 'time_trends')
                 pos_data = age_trend[age_trend['position'] == pos]
                 
-                plt.scatter(pos_data['age'], pos_data['avg_points'], 
-                          s=pos_data['player_count'] * 2, label=pos, 
-                          color=self.positions_palette.get(pos), alpha=0.7)
-        
-        # Add title and labels
-        plt.title('Fantasy Points per Game by Age (Size = Player Count)', fontsize=16, pad=20)
-        plt.xlabel('Age', fontsize=14)
-        plt.ylabel('Average Fantasy Points per Game', fontsize=14)
-        plt.legend(title='Position')
-        
-        # Set y-axis to start at 0
-        plt.ylim(bottom=0)
-        
-        # Add grid
-        plt.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.viz_dirs['trends'], 'fantasy_points_by_age_bubble.png'))
-        plt.close()
+                # Sort by age
+                pos_data = pos_data.sort_values('age')
+                
+                plt.figure(figsize=(10, 6))
+                plt.plot(pos_data['age'], pos_data['avg_points'], marker='o', 
+                       color=self.positions_palette.get(pos))
+                
+                # Add confidence interval
+                plt.fill_between(
+                    pos_data['age'],
+                    pos_data['avg_points'] - pos_data['std_points'] / np.sqrt(pos_data['player_count']),
+                    pos_data['avg_points'] + pos_data['std_points'] / np.sqrt(pos_data['player_count']),
+                    alpha=0.2, color=self.positions_palette.get(pos)
+                )
+                
+                plt.title(f'Fantasy Points by Age for {pos}', fontsize=16, pad=20)
+                plt.xlabel('Age', fontsize=14)
+                plt.ylabel('Fantasy Points per Game', fontsize=14)
+                plt.grid(True, alpha=0.3)
+                plt.tight_layout()
+                plt.savefig(os.path.join(pos_dir, 'fantasy_points_by_age.png'))
+                plt.close()
         
         logger.info("Age trend visualizations created")
     
@@ -980,21 +1090,24 @@ class FantasyDataVisualizer:
             # Get cluster model
             model_dict = cluster_models[model_key]
             
+            # Create output directory
+            cluster_dir = os.path.join(self.output_dir, position, 'clusters')
+            
             # Create cluster scatter plot
-            self._plot_clusters(train_data, position, model_dict)
+            self._plot_clusters(train_data, position, model_dict, cluster_dir)
             
             # Create radar chart for cluster characteristics
-            self._create_cluster_radar_chart(train_data, position, model_dict)
+            self._create_cluster_radar_chart(train_data, position, model_dict, cluster_dir)
             
             # Create top players by cluster table
-            self._create_top_players_table(train_data, position)
+            self._create_top_players_table(train_data, position, cluster_dir)
             
             # Create cluster stat comparison
-            self._create_cluster_stats_comparison(train_data, position)
+            self._create_cluster_stats_comparison(train_data, position, cluster_dir)
         
         logger.info("Cluster visualizations created")
     
-    def _plot_clusters(self, data, position, model_dict):
+    def _plot_clusters(self, data, position, model_dict, output_dir):
         """
         Create scatter plot of player clusters
         
@@ -1006,6 +1119,8 @@ class FantasyDataVisualizer:
             Position name
         model_dict : dict
             Dictionary containing cluster model components
+        output_dir : str
+            Output directory for visualizations
         """
         # Check if we have the necessary components
         if 'features' not in model_dict:
@@ -1121,12 +1236,12 @@ class FantasyDataVisualizer:
         plt.tight_layout()
         
         # Save figure
-        plt.savefig(os.path.join(self.viz_dirs['clusters'], f'clusters_{position}.png'))
+        plt.savefig(os.path.join(output_dir, f'clusters.png'))
         plt.close()
         
         logger.info(f"{position} cluster scatter plot created")
     
-    def _create_cluster_radar_chart(self, data, position, model_dict):
+    def _create_cluster_radar_chart(self, data, position, model_dict, output_dir):
         """
         Create radar chart showing cluster characteristics
         
@@ -1138,6 +1253,8 @@ class FantasyDataVisualizer:
             Position name
         model_dict : dict
             Dictionary containing cluster model components
+        output_dir : str
+            Output directory for visualizations
         """
         # Check if we have the necessary components
         if 'features' not in model_dict:
@@ -1212,12 +1329,12 @@ class FantasyDataVisualizer:
         plt.tight_layout()
         
         # Save figure
-        plt.savefig(os.path.join(self.viz_dirs['clusters'], f'radar_{position}.png'))
+        plt.savefig(os.path.join(output_dir, f'radar_chart.png'))
         plt.close()
         
         logger.info(f"{position} cluster radar chart created")
     
-    def _create_top_players_table(self, data, position):
+    def _create_top_players_table(self, data, position, output_dir):
         """
         Create table of top players by cluster
         
@@ -1227,6 +1344,8 @@ class FantasyDataVisualizer:
             Position data with cluster assignments
         position : str
             Position name
+        output_dir : str
+            Output directory for visualizations
         """
         # Check if we have required columns
         if 'name' not in data.columns or 'fantasy_points_per_game' not in data.columns:
@@ -1263,13 +1382,13 @@ class FantasyDataVisualizer:
             top_df = pd.concat(top_players)
             
             # Save to CSV
-            top_df.to_csv(os.path.join(self.viz_dirs['clusters'], f'top_players_by_cluster_{position}.csv'), index=False)
+            top_df.to_csv(os.path.join(output_dir, f'top_players_by_cluster.csv'), index=False)
             
             logger.info(f"{position} top players table created")
         else:
             logger.warning(f"No top players found for {position} clusters")
     
-    def _create_cluster_stats_comparison(self, data, position):
+    def _create_cluster_stats_comparison(self, data, position, output_dir):
         """
         Create statistical comparison of clusters
         
@@ -1279,6 +1398,8 @@ class FantasyDataVisualizer:
             Position data with cluster assignments
         position : str
             Position name
+        output_dir : str
+            Output directory for visualizations
         """
         # Group by cluster/tier
         group_col = 'tier' if 'tier' in data.columns else 'cluster'
@@ -1317,1002 +1438,11 @@ class FantasyDataVisualizer:
         
         # Save to CSV
         cluster_stats.reset_index().to_csv(
-            os.path.join(self.viz_dirs['clusters'], f'cluster_stats_{position}.csv'), 
+            os.path.join(output_dir, f'cluster_stats.csv'), 
             index=False
         )
         
         logger.info(f"{position} cluster stats comparison created")
-    
-    def explore_advanced_metrics(self):
-        """
-        Create visualizations for advanced metrics
-        """
-        logger.info("Creating advanced metrics visualizations")
-        
-        # Use NGS data if available
-        self._explore_ngs_data()
-        
-        # Use seasonal data for additional advanced metrics
-        seasonal = self.data_dict.get('seasonal', pd.DataFrame())
-        if seasonal.empty:
-            logger.warning("No seasonal data found for advanced metrics analysis")
-            return
-        
-        # Check for required columns
-        if 'position' not in seasonal.columns:
-            logger.warning("Missing position column for advanced metrics analysis")
-            return
-        
-        # Create fantasy points vs age visualization
-        if 'age' in seasonal.columns and 'fantasy_points_per_game' in seasonal.columns:
-            self._plot_fantasy_vs_age(seasonal)
-        
-        # Create position-specific advanced metrics
-        for position in ['QB', 'RB', 'WR', 'TE']:
-            pos_data = seasonal[seasonal['position'] == position].copy()
-            if not pos_data.empty:
-                self._plot_advanced_position_metrics(pos_data, position)
-        
-        logger.info("Advanced metrics visualizations created")
-    
-    def _explore_ngs_data(self):
-        """
-        Create visualizations for NGS data
-        """
-        # Check if NGS data is available
-        ngs_passing = self.data_dict.get('ngs_passing', pd.DataFrame())
-        ngs_rushing = self.data_dict.get('ngs_rushing', pd.DataFrame())
-        ngs_receiving = self.data_dict.get('ngs_receiving', pd.DataFrame())
-        
-        if ngs_passing.empty and ngs_rushing.empty and ngs_receiving.empty:
-            logger.warning("No NGS data available for visualization")
-            return
-        
-        # Create directory for NGS visualizations
-        ngs_dir = os.path.join(self.viz_dirs['advanced'], 'ngs')
-        os.makedirs(ngs_dir, exist_ok=True)
-        
-        # Visualize NGS passing data
-        if not ngs_passing.empty:
-            self._visualize_ngs_passing(ngs_passing, ngs_dir)
-        
-        # Visualize NGS rushing data
-        if not ngs_rushing.empty:
-            self._visualize_ngs_rushing(ngs_rushing, ngs_dir)
-        
-        # Visualize NGS receiving data
-        if not ngs_receiving.empty:
-            self._visualize_ngs_receiving(ngs_receiving, ngs_dir)
-        
-        logger.info("NGS data visualizations created")
-    
-    def _visualize_ngs_passing(self, data, output_dir):
-        """
-        Create visualizations for NGS passing data
-        
-        Parameters:
-        -----------
-        data : DataFrame
-            NGS passing data
-        output_dir : str
-            Directory to save visualizations
-        """
-        # Check for key columns
-        key_metrics = [
-            'avg_time_to_throw', 'avg_completed_air_yards', 'avg_intended_air_yards',
-            'aggressiveness', 'completion_percentage', 'completion_percentage_above_expectation'
-        ]
-        
-        available_metrics = [m for m in key_metrics if m in data.columns]
-        
-        if not available_metrics:
-            logger.warning("No key metrics available in NGS passing data")
-            return
-        
-        # Create distribution plots for each metric
-        for metric in available_metrics:
-            plt.figure(figsize=(12, 8))
-            
-            # Create histogram with KDE
-            sns.histplot(data[metric].dropna(), kde=True, color=self.positions_palette.get('QB'))
-            
-            # Add title and labels
-            plt.title(f'Distribution of {metric.replace("_", " ").title()}', fontsize=16, pad=20)
-            plt.xlabel(metric.replace('_', ' ').title(), fontsize=14)
-            plt.ylabel('Count', fontsize=14)
-            
-            # Add metric average as vertical line
-            avg = data[metric].mean()
-            plt.axvline(avg, color='red', linestyle='--', 
-                      label=f'Avg: {avg:.2f}')
-            plt.legend()
-            
-            plt.tight_layout()
-            
-            # Create safe filename
-            safe_filename = metric.lower().replace(' ', '_').replace('/', '_')
-            plt.savefig(os.path.join(output_dir, f'passing_{safe_filename}_dist.png'))
-            plt.close()
-        
-        # Create correlation heatmap
-        if len(available_metrics) > 1:
-            plt.figure(figsize=(10, 8))
-            
-            # Calculate correlation matrix
-            corr_matrix = data[available_metrics].corr()
-            
-            # Create heatmap
-            sns.heatmap(corr_matrix, annot=True, cmap=self.cmap_red_blue,
-                      vmin=-1, vmax=1, fmt='.2f')
-            
-            # Add title
-            plt.title('Correlation Matrix of NGS Passing Metrics', fontsize=16, pad=20)
-            
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_dir, 'passing_ngs_correlation.png'))
-            plt.close()
-        
-        # Create scatter plots for key relationships
-        if 'avg_intended_air_yards' in available_metrics and 'completion_percentage' in available_metrics:
-            plt.figure(figsize=(12, 8))
-            
-            # Create scatter plot
-            sns.scatterplot(
-                x='avg_intended_air_yards', 
-                y='completion_percentage', 
-                data=data,
-                color=self.positions_palette.get('QB'),
-                alpha=0.7,
-                s=50
-            )
-            
-            # Add title and labels
-            plt.title('Completion Percentage vs. Intended Air Yards', fontsize=16, pad=20)
-            plt.xlabel('Average Intended Air Yards', fontsize=14)
-            plt.ylabel('Completion Percentage', fontsize=14)
-            
-            # Add regression line
-            sns.regplot(
-                x='avg_intended_air_yards', 
-                y='completion_percentage', 
-                data=data,
-                scatter=False,
-                color='red'
-            )
-            
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_dir, 'passing_airyards_vs_completion.png'))
-            plt.close()
-        
-        logger.info("NGS passing visualizations created")
-    
-    def _visualize_ngs_rushing(self, data, output_dir):
-        """
-        Create visualizations for NGS rushing data
-        
-        Parameters:
-        -----------
-        data : DataFrame
-            NGS rushing data
-        output_dir : str
-            Directory to save visualizations
-        """
-        # Check for key columns
-        key_metrics = [
-            'efficiency', 'percent_attempts_gte_eight_defenders', 'avg_time_to_los',
-            'rush_yards_over_expected', 'rush_yards_over_expected_per_att'
-        ]
-        
-        available_metrics = [m for m in key_metrics if m in data.columns]
-        
-        if not available_metrics:
-            logger.warning("No key metrics available in NGS rushing data")
-            return
-        
-        # Create distribution plots for each metric
-        for metric in available_metrics:
-            plt.figure(figsize=(12, 8))
-            
-            # Create histogram with KDE
-            sns.histplot(data[metric].dropna(), kde=True, color=self.positions_palette.get('RB'))
-            
-            # Add title and labels
-            plt.title(f'Distribution of {metric.replace("_", " ").title()}', fontsize=16, pad=20)
-            plt.xlabel(metric.replace('_', ' ').title(), fontsize=14)
-            plt.ylabel('Count', fontsize=14)
-            
-            # Add metric average as vertical line
-            avg = data[metric].mean()
-            plt.axvline(avg, color='red', linestyle='--', 
-                      label=f'Avg: {avg:.2f}')
-            plt.legend()
-            
-            plt.tight_layout()
-            
-            # Create safe filename
-            safe_filename = metric.lower().replace(' ', '_').replace('/', '_')
-            plt.savefig(os.path.join(output_dir, f'rushing_{safe_filename}_dist.png'))
-            plt.close()
-        
-        # Create correlation heatmap
-        if len(available_metrics) > 1:
-            plt.figure(figsize=(10, 8))
-            
-            # Calculate correlation matrix
-            corr_matrix = data[available_metrics].corr()
-            
-            # Create heatmap
-            sns.heatmap(corr_matrix, annot=True, cmap=self.cmap_red_blue,
-                      vmin=-1, vmax=1, fmt='.2f')
-            
-            # Add title
-            plt.title('Correlation Matrix of NGS Rushing Metrics', fontsize=16, pad=20)
-            
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_dir, 'rushing_ngs_correlation.png'))
-            plt.close()
-        
-        # Create scatter plots for key relationships
-        if 'rush_yards_over_expected_per_att' in available_metrics and 'percent_attempts_gte_eight_defenders' in available_metrics:
-            plt.figure(figsize=(12, 8))
-            
-            # Create scatter plot
-            sns.scatterplot(
-                x='percent_attempts_gte_eight_defenders', 
-                y='rush_yards_over_expected_per_att', 
-                data=data,
-                color=self.positions_palette.get('RB'),
-                alpha=0.7,
-                s=50
-            )
-            
-            # Add title and labels
-            plt.title('Rush Yards Over Expected vs. Stacked Boxes', fontsize=16, pad=20)
-            plt.xlabel('Percent Attempts vs 8+ Defenders', fontsize=14)
-            plt.ylabel('Rush Yards Over Expected Per Attempt', fontsize=14)
-            
-            # Add regression line
-            sns.regplot(
-                x='percent_attempts_gte_eight_defenders', 
-                y='rush_yards_over_expected_per_att', 
-                data=data,
-                scatter=False,
-                color='red'
-            )
-            
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_dir, 'rushing_ryoe_vs_stacked_boxes.png'))
-            plt.close()
-        
-        logger.info("NGS rushing visualizations created")
-        
-    def _visualize_ngs_receiving(self, data, output_dir):
-        """
-        Create visualizations for NGS receiving data
-        
-        Parameters:
-        -----------
-        data : DataFrame
-            NGS receiving data
-        output_dir : str
-            Directory to save visualizations
-        """
-        # Check for key columns
-        key_metrics = [
-            'avg_cushion', 'avg_separation', 'avg_intended_air_yards',
-            'percent_share_of_intended_air_yards', 'catch_percentage',
-            'avg_yac', 'avg_expected_yac', 'avg_yac_above_expectation'
-        ]
-        
-        available_metrics = [m for m in key_metrics if m in data.columns]
-        
-        if not available_metrics:
-            logger.warning("No key metrics available in NGS receiving data")
-            return
-        
-        # Get position if available
-        if 'player_position' in data.columns:
-            # Create separate visualizations for WR and TE
-            for position in ['WR', 'TE']:
-                pos_data = data[data['player_position'] == position].copy()
-                
-                if pos_data.empty:
-                    logger.warning(f"No {position} data in NGS receiving data")
-                    continue
-                
-                # Create distribution plots for each metric
-                for metric in available_metrics:
-                    plt.figure(figsize=(12, 8))
-                    
-                    # Create histogram with KDE
-                    sns.histplot(pos_data[metric].dropna(), kde=True, color=self.positions_palette.get(position))
-                    
-                    # Add title and labels
-                    plt.title(f'Distribution of {metric.replace("_", " ").title()} for {position}s', fontsize=16, pad=20)
-                    plt.xlabel(metric.replace('_', ' ').title(), fontsize=14)
-                    plt.ylabel('Count', fontsize=14)
-                    
-                    # Add metric average as vertical line
-                    avg = pos_data[metric].mean()
-                    plt.axvline(avg, color='red', linestyle='--', 
-                              label=f'Avg: {avg:.2f}')
-                    plt.legend()
-                    
-                    plt.tight_layout()
-                    
-                    # Create safe filename
-                    safe_filename = metric.lower().replace(' ', '_').replace('/', '_')
-                    plt.savefig(os.path.join(output_dir, f'receiving_{position.lower()}_{safe_filename}_dist.png'))
-                    plt.close()
-                
-                # Create correlation heatmap
-                if len(available_metrics) > 1:
-                    plt.figure(figsize=(10, 8))
-                    
-                    # Calculate correlation matrix
-                    corr_matrix = pos_data[available_metrics].corr()
-                    
-                    # Create heatmap
-                    sns.heatmap(corr_matrix, annot=True, cmap=self.cmap_red_blue,
-                              vmin=-1, vmax=1, fmt='.2f')
-                    
-                    # Add title
-                    plt.title(f'Correlation Matrix of NGS Receiving Metrics for {position}s', fontsize=16, pad=20)
-                    
-                    plt.tight_layout()
-                    plt.savefig(os.path.join(output_dir, f'receiving_{position.lower()}_ngs_correlation.png'))
-                    plt.close()
-        else:
-            # Create general visualizations without position distinction
-            # Create distribution plots for each metric
-            for metric in available_metrics:
-                plt.figure(figsize=(12, 8))
-                
-                # Create histogram with KDE
-                sns.histplot(data[metric].dropna(), kde=True, color='#1f77b4')
-                
-                # Add title and labels
-                plt.title(f'Distribution of {metric.replace("_", " ").title()}', fontsize=16, pad=20)
-                plt.xlabel(metric.replace('_', ' ').title(), fontsize=14)
-                plt.ylabel('Count', fontsize=14)
-                
-                # Add metric average as vertical line
-                avg = data[metric].mean()
-                plt.axvline(avg, color='red', linestyle='--', 
-                          label=f'Avg: {avg:.2f}')
-                plt.legend()
-                
-                plt.tight_layout()
-                
-                # Create safe filename
-                safe_filename = metric.lower().replace(' ', '_').replace('/', '_')
-                plt.savefig(os.path.join(output_dir, f'receiving_{safe_filename}_dist.png'))
-                plt.close()
-            
-            # Create correlation heatmap
-            if len(available_metrics) > 1:
-                plt.figure(figsize=(10, 8))
-                
-                # Calculate correlation matrix
-                corr_matrix = data[available_metrics].corr()
-                
-                # Create heatmap
-                sns.heatmap(corr_matrix, annot=True, cmap=self.cmap_red_blue,
-                          vmin=-1, vmax=1, fmt='.2f')
-                
-                # Add title
-                plt.title('Correlation Matrix of NGS Receiving Metrics', fontsize=16, pad=20)
-                
-                plt.tight_layout()
-                plt.savefig(os.path.join(output_dir, 'receiving_ngs_correlation.png'))
-                plt.close()
-        
-        # Create scatter plots for key relationships
-        if 'avg_separation' in available_metrics and 'catch_percentage' in available_metrics:
-            plt.figure(figsize=(12, 8))
-            
-            # Create scatter plot
-            sns.scatterplot(
-                x='avg_separation', 
-                y='catch_percentage', 
-                data=data,
-                color='#1f77b4',
-                alpha=0.7,
-                s=50
-            )
-            
-            # Add title and labels
-            plt.title('Catch Percentage vs. Separation', fontsize=16, pad=20)
-            plt.xlabel('Average Separation (yards)', fontsize=14)
-            plt.ylabel('Catch Percentage', fontsize=14)
-            
-            # Add regression line
-            sns.regplot(
-                x='avg_separation', 
-                y='catch_percentage', 
-                data=data,
-                scatter=False,
-                color='red'
-            )
-            
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_dir, 'receiving_separation_vs_catch.png'))
-            plt.close()
-        
-        # Create YAC over expected visualization
-        if 'avg_yac_above_expectation' in available_metrics:
-            plt.figure(figsize=(12, 8))
-            
-            # Create histogram with KDE
-            sns.histplot(data['avg_yac_above_expectation'].dropna(), kde=True, color='#1f77b4')
-            
-            # Add title and labels
-            plt.title('YAC Above Expectation Distribution', fontsize=16, pad=20)
-            plt.xlabel('Average YAC Above Expectation', fontsize=14)
-            plt.ylabel('Count', fontsize=14)
-            
-            # Add vertical line at 0
-            plt.axvline(0, color='red', linestyle='--', 
-                      label='Expected YAC')
-            
-            # Add metric average
-            avg = data['avg_yac_above_expectation'].mean()
-            plt.axvline(avg, color='green', linestyle='--', 
-                      label=f'Avg: {avg:.2f}')
-            
-            plt.legend()
-            
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_dir, 'receiving_yac_above_expected.png'))
-            plt.close()
-        
-        logger.info("NGS receiving visualizations created")
-    
-    def _plot_fantasy_vs_age(self, data):
-        """
-        Create visualizations of fantasy points vs age
-        
-        Parameters:
-        -----------
-        data : DataFrame
-            Seasonal data
-        """
-        # Filter to valid ages and main positions
-        age_filter = (data['age'] > 0) & (data['age'] < 45)
-        pos_filter = data['position'].isin(['QB', 'RB', 'WR', 'TE'])
-        
-        # Apply filters
-        filtered_data = data[age_filter & pos_filter].copy()
-        
-        if filtered_data.empty:
-            logger.warning("No data after filtering for fantasy vs age")
-            return
-        
-        # Create scatter plots with regression lines for each position
-        plt.figure(figsize=(14, 10))
-        
-        for pos in ['QB', 'RB', 'WR', 'TE']:
-            if pos in filtered_data['position'].values:
-                pos_data = filtered_data[filtered_data['position'] == pos]
-                
-                # Create scatter plot
-                sns.scatterplot(
-                    x='age', 
-                    y='fantasy_points_per_game', 
-                    data=pos_data,
-                    label=pos,
-                    color=self.positions_palette.get(pos),
-                    alpha=0.6,
-                    s=30
-                )
-                
-                # Add regression line with polynomial fit (2nd degree)
-                sns.regplot(
-                    x='age', 
-                    y='fantasy_points_per_game', 
-                    data=pos_data,
-                    scatter=False,
-                    color=self.positions_palette.get(pos),
-                    order=2,
-                    label=f'{pos} trend'
-                )
-        
-        # Add title and labels
-        plt.title('Fantasy Points per Game vs. Age by Position', fontsize=16, pad=20)
-        plt.xlabel('Age', fontsize=14)
-        plt.ylabel('Fantasy Points per Game', fontsize=14)
-        
-        # Set x-axis to focus on relevant age range
-        plt.xlim(20, 40)
-        
-        # Set y-axis to start at 0
-        plt.ylim(bottom=0)
-        
-        # Add grid
-        plt.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.viz_dirs['advanced'], 'fantasy_vs_age_by_position.png'))
-        plt.close()
-        
-        # Create individual position plots for more detail
-        for pos in ['QB', 'RB', 'WR', 'TE']:
-            if pos in filtered_data['position'].values:
-                pos_data = filtered_data[filtered_data['position'] == pos]
-                
-                # Create figure
-                plt.figure(figsize=(12, 8))
-                
-                # Create scatter plot
-                sns.scatterplot(
-                    x='age', 
-                    y='fantasy_points_per_game', 
-                    data=pos_data,
-                    color=self.positions_palette.get(pos),
-                    alpha=0.7,
-                    s=50
-                )
-                
-                # Add regression line with polynomial fit (2nd degree)
-                sns.regplot(
-                    x='age', 
-                    y='fantasy_points_per_game', 
-                    data=pos_data,
-                    scatter=False,
-                    color='red',
-                    order=2
-                )
-                
-                # Add title and labels
-                plt.title(f'Fantasy Points per Game vs. Age for {pos}s', fontsize=16, pad=20)
-                plt.xlabel('Age', fontsize=14)
-                plt.ylabel('Fantasy Points per Game', fontsize=14)
-                
-                # Set x-axis to focus on relevant age range
-                plt.xlim(20, 40)
-                
-                # Set y-axis to start at 0
-                plt.ylim(bottom=0)
-                
-                # Add grid
-                plt.grid(True, alpha=0.3)
-                
-                plt.tight_layout()
-                plt.savefig(os.path.join(self.viz_dirs['advanced'], f'fantasy_vs_age_{pos.lower()}.png'))
-                plt.close()
-        
-        # Create heatmap of fantasy points by age and position
-        # Group by position and age
-        heatmap_data = filtered_data.groupby(['position', 'age'])['fantasy_points_per_game'].mean().reset_index()
-        
-        # Pivot for heatmap
-        heatmap_pivot = heatmap_data.pivot(index='position', columns='age', values='fantasy_points_per_game')
-        
-        # Fill NaN with 0
-        heatmap_pivot = heatmap_pivot.fillna(0)
-        
-        # Create heatmap
-        plt.figure(figsize=(16, 6))
-        
-        # Create custom colormap from white to blue
-        cmap = sns.color_palette("Blues", as_cmap=True)
-        
-        # Create heatmap
-        sns.heatmap(heatmap_pivot, cmap=cmap, annot=True, fmt='.1f', linewidths=0.5)
-        
-        # Add title
-        plt.title('Fantasy Points per Game by Position and Age', fontsize=16, pad=20)
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.viz_dirs['advanced'], 'fantasy_heatmap_by_age_position.png'))
-        plt.close()
-        
-        logger.info("Fantasy vs age visualizations created")
-    
-    def _plot_advanced_position_metrics(self, data, position):
-        """
-        Create visualizations for advanced position-specific metrics
-        
-        Parameters:
-        -----------
-        data : DataFrame
-            Position-specific data
-        position : str
-            Position name
-        """
-        # Create directory for position-specific advanced metrics
-        position_dir = os.path.join(self.viz_dirs['advanced'], position.lower())
-        os.makedirs(position_dir, exist_ok=True)
-        
-        # Select relevant advanced metrics based on position
-        if position == 'QB':
-            metrics = [
-                'completion_percentage', 'adjusted_yards_per_attempt', 'td_percentage', 
-                'int_percentage', 'epa_per_attempt', 'deep_ball_percentage'
-            ]
-            
-            # Add NGS metrics if available
-            ngs_metrics = [col for col in data.columns if col.startswith('ngs_')]
-            metrics.extend(ngs_metrics)
-            
-        elif position == 'RB':
-            metrics = [
-                'yards_per_carry', 'rushing_td_rate', 'receiving_opportunity_share',
-                'touches_per_game', 'fantasy_points_per_touch'
-            ]
-            
-            # Add NGS metrics if available
-            ngs_metrics = [col for col in data.columns if col.startswith('ngs_')]
-            metrics.extend(ngs_metrics)
-            
-        elif position in ['WR', 'TE']:
-            metrics = [
-                'yards_per_reception', 'yards_per_target', 'reception_rate',
-                'air_yards_share', 'yac_share', 'racr', 'fantasy_points_per_target'
-            ]
-            
-            # Add NGS metrics if available
-            ngs_metrics = [col for col in data.columns if col.startswith('ngs_')]
-            metrics.extend(ngs_metrics)
-        
-        # Filter to metrics that exist in the data
-        available_metrics = [m for m in metrics if m in data.columns]
-        
-        if not available_metrics:
-            logger.warning(f"No advanced metrics available for {position}")
-            return
-        
-        # Create scatter plots for each metric vs fantasy points
-        if 'fantasy_points_per_game' in data.columns:
-            for metric in available_metrics:
-                plt.figure(figsize=(12, 8))
-                
-                # Create scatter plot
-                sns.scatterplot(
-                    x=metric, 
-                    y='fantasy_points_per_game', 
-                    data=data,
-                    color=self.positions_palette.get(position),
-                    alpha=0.7,
-                    s=50
-                )
-                
-                # Add regression line
-                sns.regplot(
-                    x=metric, 
-                    y='fantasy_points_per_game', 
-                    data=data,
-                    scatter=False,
-                    color='red'
-                )
-                
-                # Add title and labels
-                plt.title(f'Fantasy Points per Game vs. {metric.replace("_", " ").title()}', fontsize=16, pad=20)
-                plt.xlabel(metric.replace('_', ' ').title(), fontsize=14)
-                plt.ylabel('Fantasy Points per Game', fontsize=14)
-                
-                # Add grid
-                plt.grid(True, alpha=0.3)
-                
-                plt.tight_layout()
-                
-                # Create safe filename
-                safe_filename = metric.lower().replace(' ', '_').replace('/', '_')
-                plt.savefig(os.path.join(position_dir, f'fantasy_vs_{safe_filename}.png'))
-                plt.close()
-        
-        # Create correlation matrix of advanced metrics
-        if len(available_metrics) > 1:
-            plt.figure(figsize=(12, 10))
-            
-            # Add fantasy points to correlation matrix
-            if 'fantasy_points_per_game' in data.columns:
-                corr_cols = available_metrics + ['fantasy_points_per_game']
-            else:
-                corr_cols = available_metrics
-            
-            # Calculate correlation matrix
-            corr_matrix = data[corr_cols].corr()
-            
-            # Create heatmap
-            sns.heatmap(corr_matrix, annot=True, cmap=self.cmap_red_blue,
-                      vmin=-1, vmax=1, fmt='.2f')
-            
-            # Add title
-            plt.title(f'Correlation Matrix of Advanced Metrics for {position}s', fontsize=16, pad=20)
-            
-            plt.tight_layout()
-            plt.savefig(os.path.join(position_dir, 'advanced_metrics_correlation.png'))
-            plt.close()
-        
-        # Create individual metric distributions
-        for metric in available_metrics:
-            plt.figure(figsize=(12, 8))
-            
-            # Create histogram with KDE
-            sns.histplot(data[metric].dropna(), kde=True, color=self.positions_palette.get(position))
-            
-            # Add title and labels
-            plt.title(f'Distribution of {metric.replace("_", " ").title()} for {position}s', fontsize=16, pad=20)
-            plt.xlabel(metric.replace('_', ' ').title(), fontsize=14)
-            plt.ylabel('Count', fontsize=14)
-            
-            # Add metric average as vertical line
-            avg = data[metric].mean()
-            plt.axvline(avg, color='red', linestyle='--', 
-                      label=f'Avg: {avg:.2f}')
-            plt.legend()
-            
-            plt.tight_layout()
-            
-            # Create safe filename
-            safe_filename = metric.lower().replace(' ', '_').replace('/', '_')
-            plt.savefig(os.path.join(position_dir, f'{safe_filename}_dist.png'))
-            plt.close()
-        
-        logger.info(f"{position} advanced metrics visualizations created")
-    
-    def analyze_consistency(self):
-        """
-        Create visualizations for player consistency analysis
-        """
-        logger.info("Creating consistency analysis visualizations")
-        
-        # Check if weekly data is available
-        weekly = self.data_dict.get('weekly', pd.DataFrame())
-        if weekly.empty:
-            logger.warning("No weekly data available for consistency analysis")
-            return
-        
-        # Check for required columns
-        if 'player_id' not in weekly.columns or 'position' not in weekly.columns:
-            logger.warning("Missing player_id or position columns for consistency analysis")
-            return
-        
-        # Create directory for consistency visualizations
-        consistency_dir = os.path.join(self.viz_dirs['advanced'], 'consistency')
-        os.makedirs(consistency_dir, exist_ok=True)
-        
-        # Create position-specific consistency visualizations
-        for position in ['QB', 'RB', 'WR', 'TE']:
-            pos_data = weekly[weekly['position'] == position].copy()
-            if not pos_data.empty:
-                self._analyze_position_consistency(pos_data, position, consistency_dir)
-        
-        logger.info("Consistency analysis visualizations created")
-    
-    def _analyze_position_consistency(self, data, position, output_dir):
-        """
-        Create consistency visualizations for a specific position
-        
-        Parameters:
-        -----------
-        data : DataFrame
-            Weekly data for a specific position
-        position : str
-            Position name
-        output_dir : str
-            Directory to save visualizations
-        """
-        # Check for fantasy points column
-        if 'fantasy_points' not in data.columns:
-            logger.warning(f"No fantasy points column in {position} weekly data")
-            return
-        
-        # Calculate consistency metrics by player
-        if 'player_id' in data.columns and 'week' in data.columns and 'season' in data.columns:
-            # Group by player and season
-            player_groups = data.groupby(['player_id', 'season'])
-            
-            # Calculate consistency metrics
-            consistency_stats = []
-            
-            for (player_id, season), player_data in player_groups:
-                # Only include players with at least 4 weeks of data
-                if len(player_data) >= 4:
-                    # Calculate statistics
-                    mean_points = player_data['fantasy_points'].mean()
-                    std_points = player_data['fantasy_points'].std()
-                    cv = std_points / mean_points if mean_points > 0 else float('inf')
-                    
-                    # Get player name if available
-                    player_name = player_data['name'].iloc[0] if 'name' in player_data.columns else player_id
-                    
-                    # Calculate boom and bust weeks
-                    # Boom: >1.5x average, Bust: <0.5x average
-                    boom_weeks = (player_data['fantasy_points'] > 1.5 * mean_points).sum()
-                    bust_weeks = (player_data['fantasy_points'] < 0.5 * mean_points).sum()
-                    
-                    # Calculate boom/bust ratio
-                    boom_bust_ratio = boom_weeks / bust_weeks if bust_weeks > 0 else boom_weeks
-                    
-                    # Add to results
-                    consistency_stats.append({
-                        'player_id': player_id,
-                        'name': player_name,
-                        'season': season,
-                        'games': len(player_data),
-                        'mean_points': mean_points,
-                        'std_points': std_points,
-                        'cv': cv,
-                        'boom_weeks': boom_weeks,
-                        'bust_weeks': bust_weeks,
-                        'boom_bust_ratio': boom_bust_ratio
-                    })
-            
-            # Create dataframe from results
-            if consistency_stats:
-                consistency_df = pd.DataFrame(consistency_stats)
-                
-                # Sort by mean points
-                consistency_df = consistency_df.sort_values('mean_points', ascending=False)
-                
-                # Create scatter plot of mean vs std
-                plt.figure(figsize=(12, 8))
-                
-                # Create scatter plot
-                sns.scatterplot(
-                    x='mean_points', 
-                    y='cv', 
-                    data=consistency_df,
-                    color=self.positions_palette.get(position),
-                    alpha=0.7,
-                    s=50
-                )
-                
-                # Add title and labels
-                plt.title(f'Fantasy Points Consistency for {position}s', fontsize=16, pad=20)
-                plt.xlabel('Mean Fantasy Points per Game', fontsize=14)
-                plt.ylabel('Coefficient of Variation (lower is more consistent)', fontsize=14)
-                
-                # Add quadrant lines
-                mean_x = consistency_df['mean_points'].mean()
-                mean_y = consistency_df['cv'].mean()
-                
-                plt.axvline(mean_x, color='red', linestyle='--', alpha=0.5)
-                plt.axhline(mean_y, color='red', linestyle='--', alpha=0.5)
-                
-                # Add quadrant labels
-                plt.text(
-                    consistency_df['mean_points'].max() * 0.9, 
-                    consistency_df['cv'].min() * 1.1, 
-                    'High Ceiling, Consistent',
-                    ha='right',
-                    fontsize=12,
-                    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none')
-                )
-                
-                plt.text(
-                    consistency_df['mean_points'].min() * 1.1, 
-                    consistency_df['cv'].min() * 1.1, 
-                    'Low Ceiling, Consistent',
-                    ha='left',
-                    fontsize=12,
-                    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none')
-                )
-                
-                plt.text(
-                    consistency_df['mean_points'].max() * 0.9, 
-                    consistency_df['cv'].max() * 0.9, 
-                    'High Ceiling, Volatile',
-                    ha='right',
-                    fontsize=12,
-                    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none')
-                )
-                
-                plt.text(
-                    consistency_df['mean_points'].min() * 1.1, 
-                    consistency_df['cv'].max() * 0.9, 
-                    'Low Ceiling, Volatile',
-                    ha='left',
-                    fontsize=12,
-                    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none')
-                )
-                
-                # Annotate top players
-                top_players = consistency_df.head(10)
-                for _, player in top_players.iterrows():
-                    plt.annotate(
-                        player['name'],
-                        (player['mean_points'], player['cv']),
-                        xytext=(5, 5),
-                        textcoords='offset points',
-                        fontsize=9,
-                        bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.8, ec="gray")
-                    )
-                
-                plt.tight_layout()
-                plt.savefig(os.path.join(output_dir, f'{position.lower()}_consistency_scatter.png'))
-                plt.close()
-                
-                # Create bar chart of most consistent high scorers
-                plt.figure(figsize=(14, 8))
-                
-                # Filter to high scorers
-                high_scorers = consistency_df[consistency_df['mean_points'] > consistency_df['mean_points'].quantile(0.75)]
-                
-                # Sort by consistency (CV)
-                high_scorers = high_scorers.sort_values('cv')
-                
-                # Take top 15
-                top_consistent = high_scorers.head(15)
-                
-                # Create bar chart
-                bars = plt.barh(top_consistent['name'], top_consistent['mean_points'])
-                
-                # Color bars by consistency
-                for i, bar in enumerate(bars):
-                    # Color based on CV (lower is more consistent)
-                    cv = top_consistent.iloc[i]['cv']
-                    # Normalize to 0-1 range
-                    cv_norm = (cv - top_consistent['cv'].min()) / (top_consistent['cv'].max() - top_consistent['cv'].min())
-                    # Convert to RGB
-                    color = plt.cm.viridis(1 - cv_norm)  # Invert so lower CV is better color
-                    bar.set_color(color)
-                
-                # Add consistency annotations
-                for i, (_, player) in enumerate(top_consistent.iterrows()):
-                    plt.text(
-                        player['mean_points'] + 0.5, 
-                        i, 
-                        f'CV: {player["cv"]:.2f}',
-                        va='center',
-                        fontsize=9
-                    )
-                
-                # Add title and labels
-                plt.title(f'Most Consistent High-Scoring {position}s', fontsize=16, pad=20)
-                plt.xlabel('Mean Fantasy Points per Game', fontsize=14)
-                
-                plt.tight_layout()
-                plt.savefig(os.path.join(output_dir, f'{position.lower()}_consistent_scorers.png'))
-                plt.close()
-                
-                # Create boom/bust visualization
-                plt.figure(figsize=(14, 8))
-                
-                # Filter to players with enough games
-                boom_bust_data = consistency_df[consistency_df['games'] >= 8]
-                
-                # Sort by boom/bust ratio
-                boom_bust_data = boom_bust_data.sort_values('boom_bust_ratio', ascending=False)
-                
-                # Take top 15
-                top_boom_bust = boom_bust_data.head(15)
-                
-                # Create stacked bar chart
-                plt.figure(figsize=(14, 8))
-                
-                # Create positions for bars
-                y_pos = np.arange(len(top_boom_bust))
-                
-                # Create stacked bars
-                plt.barh(y_pos, top_boom_bust['boom_weeks'], color='green', label='Boom Weeks')
-                plt.barh(y_pos, top_boom_bust['bust_weeks'], left=top_boom_bust['boom_weeks'], color='red', label='Bust Weeks')
-                
-                # Add labels
-                plt.yticks(y_pos, top_boom_bust['name'])
-                
-                # Add boom/bust ratio
-                for i, (_, player) in enumerate(top_boom_bust.iterrows()):
-                    plt.text(
-                        player['boom_weeks'] + player['bust_weeks'] + 0.2, 
-                        i, 
-                        f'Ratio: {player["boom_bust_ratio"]:.1f}',
-                        va='center',
-                        fontsize=9
-                    )
-                
-                # Add title and labels
-                plt.title(f'Boom/Bust Analysis for {position}s', fontsize=16, pad=20)
-                plt.xlabel('Number of Weeks', fontsize=14)
-                plt.legend()
-                
-                plt.tight_layout()
-                plt.savefig(os.path.join(output_dir, f'{position.lower()}_boom_bust.png'))
-                plt.close()
-        
-        logger.info(f"{position} consistency visualizations created")
     
     def run_all_visualizations(self, league_data=None):
         """
@@ -2334,12 +1464,6 @@ class FantasyDataVisualizer:
         
         # Explore performance trends
         self.explore_performance_trends()
-        
-        # Explore advanced metrics
-        self.explore_advanced_metrics()
-        
-        # Analyze consistency
-        self.analyze_consistency()
         
         # Visualize clusters if feature sets and cluster models are available
         if hasattr(self, 'feature_sets') and hasattr(self, 'cluster_models'):

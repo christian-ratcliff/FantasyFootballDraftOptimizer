@@ -2,7 +2,10 @@
 .vscode
 configs
 old
+data
 
 __pycache__
 
 *.log
+*.png
+*.csv

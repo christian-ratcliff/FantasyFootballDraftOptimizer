@@ -1,0 +1,864 @@
+{
+  "league_info": {
+    "name": "Friends and Family v.2",
+    "team_count": 10,
+    "playoff_teams": 4
+  },
+  "scoring_settings": {
+    "PA0": 5.0,
+    "PA1": 4.0,
+    "PA28": -1.0,
+    "2PRET": 2.0,
+    "YA449": -3.0,
+    "RTD": 6.0,
+    "1PSF": 1.0,
+    "FUML": -2.0,
+    "YA499": -5.0,
+    "INT": 2.0,
+    "YA549": -6.0,
+    "YA550": -7.0,
+    "BLKKRTD": 6.0,
+    "SF": 2.0,
+    "PA7": 3.0,
+    "FR": 2.0,
+    "BLKK": 2.0,
+    "2PC": 2.0,
+    "RETD": 6.0,
+    "INTT": -2.0,
+    "PTD": 4.0,
+    "PRTD": 6.0,
+    "RY": 0.1,
+    "REC": 0.5,
+    "INTTD": 6.0,
+    "FTD": 6.0,
+    "KRTD": 6.0,
+    "FG0": 3.0,
+    "2PR": 2.0,
+    "FRTD": 6.0,
+    "FG40": 4.0,
+    "PA14": 1.0,
+    "YA100": 5.0,
+    "SK": 1.0,
+    "PA46": -5.0,
+    "FGM": -1.0,
+    "PY": 0.04,
+    "PA35": -3.0,
+    "YA399": -1.0,
+    "PAT": 1.0,
+    "REY": 0.1,
+    "YA199": 3.0,
+    "2PRE": 2.0,
+    "YA299": 2.0,
+    "FG60": 6.0,
+    "FG50": 5.0
+  },
+  "roster_settings": {
+    "QB": 1,
+    "TQB": 0,
+    "RB": 2,
+    "RB/WR": 0,
+    "WR": 3,
+    "WR/TE": 0,
+    "TE": 1,
+    "OP": 1,
+    "DT": 0,
+    "DE": 0,
+    "LB": 0,
+    "DL": 0,
+    "CB": 0,
+    "S": 0,
+    "DB": 0,
+    "DP": 0,
+    "D/ST": 0,
+    "K": 0,
+    "P": 0,
+    "HC": 0,
+    "BE": 8,
+    "IR": 1,
+    "": 0,
+    "RB/WR/TE": 2,
+    "ER": 0
+  },
+  "teams": [
+    {
+      "team_id": 1,
+      "team_name": "Who Killed Charbonnet Ramsey?",
+      "owner": {
+        "displayName": "Christian61196",
+        "firstName": "Christian",
+        "id": "{42614A28-F6F5-4052-A14A-28F6F52052AF}",
+        "lastName": "Ratcliff",
+        "notificationSettings": [
+          {
+            "enabled": true,
+            "id": "edd86bbc-6579-36cd-85fb-0a9932f95cc1",
+            "type": "TEAM_PLAYER_INJURY"
+          },
+          {
+            "enabled": true,
+            "id": "f7c67970-9ae5-311d-90e8-9f3a85d11748",
+            "type": "TEAM_PLAYER_AVAILABILITY"
+          },
+          {
+            "enabled": true,
+            "id": "a063d2b9-a7ec-3891-9177-fb2ca98e620b",
+            "type": "TEAM_PLAYER_NEWS"
+          },
+          {
+            "enabled": true,
+            "id": "f16ff2a6-11ac-3270-9fde-532976284fbd",
+            "type": "TEAM_PLAYER_STARTBENCH"
+          },
+          {
+            "enabled": true,
+            "id": "1b8b3db9-dbb1-3617-8ff6-786518510eb9",
+            "type": "TEAM_TRADE_OFFER"
+          },
+          {
+            "enabled": true,
+            "id": "efc6c35f-7be6-3a44-8ad8-904bd98ee09a",
+            "type": "DRAFT"
+          },
+          {
+            "enabled": true,
+            "id": "9a4d9aa1-6da8-35bb-aaf7-a6b59e076805",
+            "type": "TEAM_MATCHUP_SCORE"
+          },
+          {
+            "enabled": true,
+            "id": "9c8dfc0b-96f9-3258-982a-547ba58c3d76",
+            "type": "KEY_PLAY"
+          },
+          {
+            "enabled": true,
+            "id": "f063c1ae-b674-341c-a414-dddd9a90ba1e",
+            "type": "REDZONE"
+          },
+          {
+            "enabled": true,
+            "id": "1aaa5bf5-caae-34a1-b3e5-cb1e528bf377",
+            "type": "ADD_DROP"
+          },
+          {
+            "enabled": true,
+            "id": "fcd778d6-aa66-3ad6-a016-68ff5672ae93",
+            "type": "WEEKLY_RECAP"
+          },
+          {
+            "enabled": true,
+            "id": "f6f03e50-1fc7-399a-ab0f-7d4b202af552",
+            "type": "WAIVERS"
+          },
+          {
+            "enabled": true,
+            "id": "42211336-7300-37f4-8b02-a61170588b4b",
+            "type": "CELEBRATION_SHARE"
+          }
+        ]
+      },
+      "division": "League Standings"
+    },
+    {
+      "team_id": 2,
+      "team_name": "Pink Pony Club",
+      "owner": {
+        "displayName": "patsfancd77",
+        "firstName": "Connor",
+        "id": "{C4D96691-49A7-48FF-B4C6-ABD6A4C2EADD}",
+        "lastName": "Dickson",
+        "notificationSettings": [
+          {
+            "enabled": false,
+            "id": "32242867-c123-3fef-9f8e-08a690b72f00",
+            "type": "REDZONE"
+          },
+          {
+            "enabled": false,
+            "id": "90880c7f-f0ad-388b-9912-f4c969818049",
+            "type": "TEAM_PLAYER_NEWS"
+          },
+          {
+            "enabled": false,
+            "id": "fd1751ad-dd7a-3c0f-ac6b-ad6e40bd442a",
+            "type": "TEAM_MATCHUP_SCORE"
+          },
+          {
+            "enabled": true,
+            "id": "7fa632c1-adf2-326b-bc40-331f0adbb2dd",
+            "type": "TEAM_PLAYER_INJURY"
+          },
+          {
+            "enabled": true,
+            "id": "ac0cf3d6-a65a-31c7-910d-14b0b02e62a5",
+            "type": "TEAM_PLAYER_AVAILABILITY"
+          },
+          {
+            "enabled": true,
+            "id": "72cd04b0-9c21-3520-a96d-1142c627dd44",
+            "type": "TEAM_PLAYER_STARTBENCH"
+          },
+          {
+            "enabled": true,
+            "id": "a739d50a-787a-38f6-903e-a0115d0879d7",
+            "type": "TEAM_TRADE_OFFER"
+          },
+          {
+            "enabled": true,
+            "id": "2bb2aea8-8dc3-340f-9372-63f89f92347f",
+            "type": "DRAFT"
+          },
+          {
+            "enabled": true,
+            "id": "26ae1f4f-19db-36ff-b3d8-18d548ea2947",
+            "type": "KEY_PLAY"
+          },
+          {
+            "enabled": true,
+            "id": "8bf1e300-ca05-3072-850c-baff21ba0d75",
+            "type": "ADD_DROP"
+          },
+          {
+            "enabled": true,
+            "id": "3d5f7f72-7dc8-30ca-8b87-31162c76d6e3",
+            "type": "WEEKLY_RECAP"
+          },
+          {
+            "enabled": true,
+            "id": "2df8d10a-8b97-36bb-8c09-2fcb854eb011",
+            "type": "WAIVERS"
+          },
+          {
+            "enabled": true,
+            "id": "87e40a96-c412-330a-91cd-87a60e2f2793",
+            "type": "CELEBRATION_SHARE"
+          }
+        ]
+      },
+      "division": "League Standings"
+    },
+    {
+      "team_id": 3,
+      "team_name": "Tom and Jerry",
+      "owner": {
+        "displayName": "Ratclifftom",
+        "firstName": "Tom",
+        "id": "{F56B7BA2-C44F-4560-AB7B-A2C44FA56036}",
+        "lastName": "Ratcliff",
+        "notificationSettings": [
+          {
+            "enabled": true,
+            "id": "5fd50321-da3c-3816-851c-935ad025cee3",
+            "type": "TEAM_PLAYER_INJURY"
+          },
+          {
+            "enabled": true,
+            "id": "eded91a5-c24c-38d7-bdf0-28e8ea929e64",
+            "type": "TEAM_PLAYER_AVAILABILITY"
+          },
+          {
+            "enabled": true,
+            "id": "d813c3e8-51ec-3f86-bccc-d240051a4447",
+            "type": "TEAM_PLAYER_NEWS"
+          },
+          {
+            "enabled": true,
+            "id": "e501e88c-8d30-3cf7-a40e-c980aab658bb",
+            "type": "TEAM_PLAYER_STARTBENCH"
+          },
+          {
+            "enabled": true,
+            "id": "dce0b32a-7203-3b47-826b-d06c70a1a6a6",
+            "type": "TEAM_TRADE_OFFER"
+          },
+          {
+            "enabled": true,
+            "id": "1189b214-d934-394d-aab1-81bbd3dc0134",
+            "type": "DRAFT"
+          },
+          {
+            "enabled": true,
+            "id": "799e7e94-4273-3d01-aba4-6ffebe233096",
+            "type": "TEAM_MATCHUP_SCORE"
+          },
+          {
+            "enabled": true,
+            "id": "de20f135-e610-3a2d-8d33-f1ba7502dba2",
+            "type": "KEY_PLAY"
+          },
+          {
+            "enabled": true,
+            "id": "476080dd-0489-33c0-bc9b-900a5d4376c6",
+            "type": "REDZONE"
+          },
+          {
+            "enabled": true,
+            "id": "003f381f-6a57-36a9-be69-f66d56c925c9",
+            "type": "ADD_DROP"
+          },
+          {
+            "enabled": true,
+            "id": "3dc3695f-eddf-3ff0-9c6e-2bf8917ea3b3",
+            "type": "WEEKLY_RECAP"
+          },
+          {
+            "enabled": true,
+            "id": "a7eb6dda-b6c1-3362-9db8-1eee08295942",
+            "type": "WAIVERS"
+          },
+          {
+            "enabled": true,
+            "id": "8142f522-86dc-3e8c-a35c-c40da00e19dd",
+            "type": "CELEBRATION_SHARE"
+          }
+        ]
+      },
+      "division": "League Standings"
+    },
+    {
+      "team_id": 4,
+      "team_name": "Hit and Ruggs",
+      "owner": {
+        "displayName": "rhino242409",
+        "firstName": "Ryan",
+        "id": "{C56BDB4F-5EFF-427C-92A6-6049EF3DC074}",
+        "lastName": "Ratcliff",
+        "notificationSettings": [
+          {
+            "enabled": true,
+            "id": "e8e9e26c-b190-3e65-a93c-93cc7c537369",
+            "type": "TEAM_PLAYER_INJURY"
+          },
+          {
+            "enabled": true,
+            "id": "4a08e9e9-bec3-3143-af9e-ffeb977e21e5",
+            "type": "TEAM_PLAYER_AVAILABILITY"
+          },
+          {
+            "enabled": true,
+            "id": "2e3a673f-04bf-352f-8aba-d04d4f17968f",
+            "type": "TEAM_PLAYER_NEWS"
+          },
+          {
+            "enabled": true,
+            "id": "26818113-2d0a-3a3d-8397-837fdba4152d",
+            "type": "TEAM_PLAYER_STARTBENCH"
+          },
+          {
+            "enabled": true,
+            "id": "36a4bbce-62b2-3622-a415-e54911f301de",
+            "type": "TEAM_TRADE_OFFER"
+          },
+          {
+            "enabled": true,
+            "id": "260def23-2176-3929-86a5-9e4c32ca9d0d",
+            "type": "DRAFT"
+          },
+          {
+            "enabled": true,
+            "id": "fffee14f-c49c-3f0e-96b4-51e28a0a6c2d",
+            "type": "TEAM_MATCHUP_SCORE"
+          },
+          {
+            "enabled": true,
+            "id": "67070aa5-43cf-37da-80e2-ddca1e46a439",
+            "type": "KEY_PLAY"
+          },
+          {
+            "enabled": true,
+            "id": "774f1356-c1fc-3a69-a0dd-aec6c0fc8d16",
+            "type": "REDZONE"
+          },
+          {
+            "enabled": true,
+            "id": "f089b645-a017-35dd-b9f4-af90d066a5fc",
+            "type": "ADD_DROP"
+          },
+          {
+            "enabled": true,
+            "id": "7ff7928d-9623-3566-8016-ec9a5eb4a7b5",
+            "type": "WEEKLY_RECAP"
+          },
+          {
+            "enabled": true,
+            "id": "921c9fd5-9e58-3c42-a699-2ac63d2993da",
+            "type": "WAIVERS"
+          },
+          {
+            "enabled": true,
+            "id": "39457de6-5fca-3966-8be3-464a570af1cf",
+            "type": "CELEBRATION_SHARE"
+          }
+        ]
+      },
+      "division": "League Standings"
+    },
+    {
+      "team_id": 5,
+      "team_name": "Michael's Managable Team",
+      "owner": {
+        "displayName": "ESPNFAN2312963230",
+        "firstName": "Michael",
+        "id": "{FFC9F288-0DDF-4641-825B-7598241C3BCD}",
+        "lastName": "Ratcliff",
+        "notificationSettings": [
+          {
+            "enabled": true,
+            "id": "1df4500d-e76c-3479-b49e-8150a8d161bf",
+            "type": "TEAM_PLAYER_INJURY"
+          },
+          {
+            "enabled": true,
+            "id": "9c71bf51-d287-3fd7-a3b4-7063d918ea53",
+            "type": "TEAM_PLAYER_AVAILABILITY"
+          },
+          {
+            "enabled": true,
+            "id": "1fe679f3-2a4b-37bf-8738-8d898706513a",
+            "type": "TEAM_PLAYER_NEWS"
+          },
+          {
+            "enabled": true,
+            "id": "96916c0b-1993-312d-9dfe-5659ad434043",
+            "type": "TEAM_PLAYER_STARTBENCH"
+          },
+          {
+            "enabled": true,
+            "id": "66f5bbc8-db23-36ec-ae51-762918a5d882",
+            "type": "TEAM_TRADE_OFFER"
+          },
+          {
+            "enabled": true,
+            "id": "c4224601-a696-3dde-9506-8fd9e95f7f3a",
+            "type": "DRAFT"
+          },
+          {
+            "enabled": true,
+            "id": "3b099385-e769-3f81-b181-61e7c6b57d8d",
+            "type": "TEAM_MATCHUP_SCORE"
+          },
+          {
+            "enabled": true,
+            "id": "b17204fa-22d4-3874-8dc4-e3890415892c",
+            "type": "KEY_PLAY"
+          },
+          {
+            "enabled": true,
+            "id": "bc066cd0-1f6e-3abb-a259-82f46e2cd98f",
+            "type": "REDZONE"
+          },
+          {
+            "enabled": true,
+            "id": "611508f8-2cbc-398b-8624-883e5350e4ca",
+            "type": "ADD_DROP"
+          },
+          {
+            "enabled": true,
+            "id": "28ae1b35-9de5-37cd-a27c-547f4536a313",
+            "type": "WEEKLY_RECAP"
+          },
+          {
+            "enabled": true,
+            "id": "58cd4259-95ef-3741-bd69-dc6181c7acd5",
+            "type": "WAIVERS"
+          },
+          {
+            "enabled": true,
+            "id": "e0030afe-40d4-3bb8-96d7-b2036275c5b7",
+            "type": "CELEBRATION_SHARE"
+          }
+        ]
+      },
+      "division": "League Standings"
+    },
+    {
+      "team_id": 6,
+      "team_name": "To Infinity and Bijan!",
+      "owner": {
+        "displayName": "hillnick123",
+        "firstName": "Nick",
+        "id": "{B1A62FE5-8E29-48BB-B169-4782E2BE3C13}",
+        "lastName": "Hill",
+        "notificationSettings": [
+          {
+            "enabled": true,
+            "id": "d37ab7a3-1c3c-3370-80ce-63e9c7fe64ef",
+            "type": "TEAM_PLAYER_INJURY"
+          },
+          {
+            "enabled": true,
+            "id": "baf2e9f5-af21-3fff-9a7e-39e937e2e47e",
+            "type": "TEAM_PLAYER_AVAILABILITY"
+          },
+          {
+            "enabled": true,
+            "id": "79fdf658-196f-32b0-85ed-fdb62ed43bb6",
+            "type": "TEAM_PLAYER_NEWS"
+          },
+          {
+            "enabled": true,
+            "id": "e18f2cef-358d-3aa7-95ea-c02e23ea1304",
+            "type": "TEAM_PLAYER_STARTBENCH"
+          },
+          {
+            "enabled": true,
+            "id": "c6e2642e-2b6c-3017-bdeb-ac2c2040a5f5",
+            "type": "TEAM_TRADE_OFFER"
+          },
+          {
+            "enabled": true,
+            "id": "07bbc0b5-a7df-33f7-af99-c5e993eeda9c",
+            "type": "DRAFT"
+          },
+          {
+            "enabled": true,
+            "id": "fa066205-c3ba-3424-adec-e7b9f33142cf",
+            "type": "TEAM_MATCHUP_SCORE"
+          },
+          {
+            "enabled": true,
+            "id": "511fd72a-c975-36e5-85ae-ea490b3646e4",
+            "type": "KEY_PLAY"
+          },
+          {
+            "enabled": true,
+            "id": "74612aa6-7ec7-3284-a7a8-4eb3d558d69a",
+            "type": "REDZONE"
+          },
+          {
+            "enabled": true,
+            "id": "06aac54d-31c6-3446-8303-418c7b077bd3",
+            "type": "ADD_DROP"
+          },
+          {
+            "enabled": true,
+            "id": "e5e19cea-75c7-3ec8-bedd-72aec621bcd5",
+            "type": "WEEKLY_RECAP"
+          },
+          {
+            "enabled": true,
+            "id": "35136b3d-3ad3-3221-87e8-c630dbe3610b",
+            "type": "WAIVERS"
+          },
+          {
+            "enabled": true,
+            "id": "3495ba83-9d80-3080-9a27-e453bb1f5697",
+            "type": "CELEBRATION_SHARE"
+          }
+        ]
+      },
+      "division": "League Standings"
+    },
+    {
+      "team_id": 7,
+      "team_name": "Fantasy Guru Kayden",
+      "owner": {
+        "displayName": "ESPNFAN1028936791",
+        "firstName": "Kayden",
+        "id": "{448B1569-D81A-4168-9BD0-972D772226D1}",
+        "lastName": "Mullins",
+        "notificationSettings": [
+          {
+            "enabled": true,
+            "id": "05dfc764-47b2-3682-a8e1-70b8a6d2a010",
+            "type": "TEAM_PLAYER_INJURY"
+          },
+          {
+            "enabled": true,
+            "id": "d86d9cce-7955-3d2e-b9a4-4ad047fd9188",
+            "type": "TEAM_PLAYER_AVAILABILITY"
+          },
+          {
+            "enabled": true,
+            "id": "d73f059a-96d8-3fc4-bf7a-6c3b0d3d7ab2",
+            "type": "TEAM_PLAYER_NEWS"
+          },
+          {
+            "enabled": true,
+            "id": "ecdeebee-28bb-30e5-9809-6868e51d8723",
+            "type": "TEAM_PLAYER_STARTBENCH"
+          },
+          {
+            "enabled": true,
+            "id": "41b516ed-4cb0-3f04-9daf-a392035ef213",
+            "type": "TEAM_TRADE_OFFER"
+          },
+          {
+            "enabled": true,
+            "id": "f015377a-65fc-3980-ace0-3f4b0fd60c07",
+            "type": "DRAFT"
+          },
+          {
+            "enabled": true,
+            "id": "b135e3d8-3865-39d6-8908-a9c985f1e529",
+            "type": "TEAM_MATCHUP_SCORE"
+          },
+          {
+            "enabled": true,
+            "id": "b05e3921-1d6d-3328-814f-44767e8ecab6",
+            "type": "KEY_PLAY"
+          },
+          {
+            "enabled": true,
+            "id": "cc79be20-10d2-31cd-b0ae-7c3996398548",
+            "type": "REDZONE"
+          },
+          {
+            "enabled": true,
+            "id": "592cee20-73e8-3e37-826a-b2326c4f9aa8",
+            "type": "ADD_DROP"
+          },
+          {
+            "enabled": true,
+            "id": "beeb0506-06d8-33d7-be15-150ca0293376",
+            "type": "WEEKLY_RECAP"
+          },
+          {
+            "enabled": true,
+            "id": "131ac803-240d-39e6-b4de-1680522d1932",
+            "type": "WAIVERS"
+          },
+          {
+            "enabled": true,
+            "id": "c330b8c6-b3b1-3095-ab94-ee1431fe7cc9",
+            "type": "CELEBRATION_SHARE"
+          }
+        ]
+      },
+      "division": "League Standings"
+    },
+    {
+      "team_id": 8,
+      "team_name": "Mama Daughter Duo",
+      "owner": {
+        "displayName": "ESPNFAN4549978031",
+        "firstName": "Cathy",
+        "id": "{7C05FA4E-31D3-4C1E-AE73-E218A2F1CE38}",
+        "lastName": "Dickson",
+        "notificationSettings": [
+          {
+            "enabled": true,
+            "id": "e3a5537b-41b6-388b-a1ce-b1037c9b3984",
+            "type": "TEAM_PLAYER_INJURY"
+          },
+          {
+            "enabled": true,
+            "id": "5d1c024d-d0bf-3ca1-8545-517fb2522b84",
+            "type": "TEAM_PLAYER_AVAILABILITY"
+          },
+          {
+            "enabled": true,
+            "id": "5825840e-ae73-304a-84c6-c42d4a5551d0",
+            "type": "TEAM_PLAYER_NEWS"
+          },
+          {
+            "enabled": true,
+            "id": "c72253a4-b373-31c7-8886-c0a8fae7745a",
+            "type": "TEAM_PLAYER_STARTBENCH"
+          },
+          {
+            "enabled": true,
+            "id": "23e37eb4-5919-35b4-a3e0-0e967180eb63",
+            "type": "TEAM_TRADE_OFFER"
+          },
+          {
+            "enabled": true,
+            "id": "82175ecf-68b1-341c-9fde-b668f89cf7ce",
+            "type": "DRAFT"
+          },
+          {
+            "enabled": true,
+            "id": "25456346-cd68-3d0d-b4d5-ef84d8eedb31",
+            "type": "TEAM_MATCHUP_SCORE"
+          },
+          {
+            "enabled": true,
+            "id": "52fd8b24-f5c7-3b5e-8114-93f4211fe342",
+            "type": "KEY_PLAY"
+          },
+          {
+            "enabled": true,
+            "id": "3d8043ee-b8ce-366b-b7f6-2f01fc39621c",
+            "type": "REDZONE"
+          },
+          {
+            "enabled": true,
+            "id": "0ec892a6-8200-3856-8a9b-9330c18d0213",
+            "type": "ADD_DROP"
+          },
+          {
+            "enabled": true,
+            "id": "b9f62df8-199f-304c-8948-9ee7adbe3827",
+            "type": "WEEKLY_RECAP"
+          },
+          {
+            "enabled": true,
+            "id": "c7fb2020-1db3-35a2-8059-b47403879ad3",
+            "type": "WAIVERS"
+          },
+          {
+            "enabled": true,
+            "id": "4a7aa4af-c654-36b3-aaba-5cc8e401bf71",
+            "type": "CELEBRATION_SHARE"
+          }
+        ]
+      },
+      "division": "League Standings"
+    },
+    {
+      "team_id": 9,
+      "team_name": "Abbey Road to Victory",
+      "owner": {
+        "displayName": "ESPNfan7853689404",
+        "firstName": "Abbey",
+        "id": "{DC11C887-625A-4536-B79F-468B3C4FF50E}",
+        "lastName": "Hamlin",
+        "notificationSettings": [
+          {
+            "enabled": true,
+            "id": "d9c43ff8-8d68-37f7-9ef2-b8e21082df4a",
+            "type": "TEAM_PLAYER_INJURY"
+          },
+          {
+            "enabled": true,
+            "id": "15b400de-2379-349a-926b-c760a14a086d",
+            "type": "TEAM_PLAYER_AVAILABILITY"
+          },
+          {
+            "enabled": true,
+            "id": "cc2083d0-d9eb-3d88-9374-499707895f41",
+            "type": "TEAM_PLAYER_NEWS"
+          },
+          {
+            "enabled": true,
+            "id": "bb189f56-7fe2-3612-a297-32d503a9d44e",
+            "type": "TEAM_PLAYER_STARTBENCH"
+          },
+          {
+            "enabled": true,
+            "id": "55a14155-c478-3de8-967a-24f456bfa9be",
+            "type": "TEAM_TRADE_OFFER"
+          },
+          {
+            "enabled": true,
+            "id": "9fff0cee-7b3b-31ff-9373-22ecddfe1a54",
+            "type": "DRAFT"
+          },
+          {
+            "enabled": true,
+            "id": "e845d5a9-fcde-3b35-ba76-836dfc3dc4f7",
+            "type": "TEAM_MATCHUP_SCORE"
+          },
+          {
+            "enabled": true,
+            "id": "01abdb85-ac61-3289-955f-685fc69c944e",
+            "type": "KEY_PLAY"
+          },
+          {
+            "enabled": true,
+            "id": "b1314117-415b-35b0-9521-32a8d9375467",
+            "type": "REDZONE"
+          },
+          {
+            "enabled": true,
+            "id": "d66bc268-506f-38e7-86af-0dfd54f32dfc",
+            "type": "ADD_DROP"
+          },
+          {
+            "enabled": true,
+            "id": "d3ee3e68-b0c2-36e2-9db6-43316210a269",
+            "type": "WEEKLY_RECAP"
+          },
+          {
+            "enabled": true,
+            "id": "00fc5ed3-791b-3e9f-8e32-9e1b5456fce6",
+            "type": "WAIVERS"
+          },
+          {
+            "enabled": true,
+            "id": "137c583d-dfe3-3d74-82ad-8de3420b2401",
+            "type": "CELEBRATION_SHARE"
+          }
+        ]
+      },
+      "division": "League Standings"
+    },
+    {
+      "team_id": 10,
+      "team_name": "Hamlin My Business ",
+      "owner": {
+        "displayName": "ESPNFAN3052783392",
+        "firstName": "Kyle",
+        "id": "{F0F0FD3E-D750-45FE-B90B-E6CC7B0A4821}",
+        "lastName": "Hamlin",
+        "notificationSettings": [
+          {
+            "enabled": true,
+            "id": "e705ae8a-fa54-3db7-9771-5bfd64a35c37",
+            "type": "TEAM_PLAYER_INJURY"
+          },
+          {
+            "enabled": true,
+            "id": "5b4d34de-0e1d-35fc-bf07-2ed44dd763af",
+            "type": "TEAM_PLAYER_AVAILABILITY"
+          },
+          {
+            "enabled": true,
+            "id": "c11c4a56-4f58-3ff7-a65d-a836c5f41fcd",
+            "type": "TEAM_PLAYER_NEWS"
+          },
+          {
+            "enabled": true,
+            "id": "576c51e7-7128-3161-9a10-f090a0d56a3c",
+            "type": "TEAM_PLAYER_STARTBENCH"
+          },
+          {
+            "enabled": true,
+            "id": "a6385485-a6d4-30cd-b05d-b8db31ac7dc6",
+            "type": "TEAM_TRADE_OFFER"
+          },
+          {
+            "enabled": true,
+            "id": "e27139e8-6292-34b0-93de-af51fb8edafe",
+            "type": "DRAFT"
+          },
+          {
+            "enabled": true,
+            "id": "2d287812-a0cb-35bf-bf81-c29d3375e58a",
+            "type": "TEAM_MATCHUP_SCORE"
+          },
+          {
+            "enabled": true,
+            "id": "ee5a0c67-3177-3b89-b2e3-e5cfd8c06739",
+            "type": "KEY_PLAY"
+          },
+          {
+            "enabled": true,
+            "id": "af1c03bc-cf30-30f9-809e-a1fcbfdd64fb",
+            "type": "REDZONE"
+          },
+          {
+            "enabled": true,
+            "id": "2d54c7d9-5c9c-3424-a3f0-64ee25a84678",
+            "type": "ADD_DROP"
+          },
+          {
+            "enabled": true,
+            "id": "64e7819c-0495-39fa-a574-867ebc2cd4bb",
+            "type": "WEEKLY_RECAP"
+          },
+          {
+            "enabled": true,
+            "id": "16bc75a0-8172-3b91-bd08-5c572ec31d12",
+            "type": "WAIVERS"
+          },
+          {
+            "enabled": true,
+            "id": "ee107d61-ab29-376f-8705-334591e32726",
+            "type": "CELEBRATION_SHARE"
+          }
+        ]
+      },
+      "division": "League Standings"
+    }
+  ]
+}

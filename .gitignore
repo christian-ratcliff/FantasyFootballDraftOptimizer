@@ -1,0 +1,8 @@
+.venv
+.vscode
+configs
+old
+
+__pycache__
+
+*.log

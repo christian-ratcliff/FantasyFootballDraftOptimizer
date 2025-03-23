@@ -1,0 +1,10 @@
+certifi==2025.1.31
+espn-api==0.44.1
+matplotlib==3.10.1
+nfl_data_py==0.3.3
+numpy==1.26.4
+pandas==1.5.3
+requests==2.32.3
+scikit-learn==1.6.1
+scipy==1.15.2
+seaborn==0.13.2

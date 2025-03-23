@@ -203,8 +203,6 @@ class FantasyFeatureEngineering:
                 15 +
                 # Year 2 QBs often take a leap
                 (df['career_seasons'] == 2) * 25 +
-                # Draft capital matters
-                (df['draft_round'] <= 1).astype(int) * 25 +
                 # Already seeing good volume
                 (df['attempts_per_game'] >= 30) * 15 +
                 # Quality receivers helps breakout chances
@@ -435,8 +433,6 @@ class FantasyFeatureEngineering:
                 20 +
                 # Year 2 RBs often break out
                 (df['career_seasons'] == 1) * 30 +
-                # Draft capital matters significantly for RBs
-                (df['draft_round'] <= 2).astype(int) * 20 +
                 # Already seeing good volume
                 (df['touches_per_game'] >= 12) * 15 +
                 # Low committee competition
@@ -780,8 +776,6 @@ class FantasyFeatureEngineering:
                     20 +
                     # Year 2 WRs have highest breakout rate
                     (df.loc[wr_mask, 'career_seasons'] == 2) * 30 +
-                    # High draft capital WRs (round 1-2) tend to break out more
-                    (df.loc[wr_mask, 'draft_round'] <= 2).astype(int) * 20 +
                     # Already seeing good volume but not yet elite production
                     (df.loc[wr_mask, 'targets_per_game'].between(5, 8)) * 15 +
                     # Growing target share
@@ -795,8 +789,6 @@ class FantasyFeatureEngineering:
                     15 +
                     # Year 3 TEs have highest breakout rate
                     (df.loc[te_mask, 'career_seasons'] == 3) * 25 +
-                    # Draft capital matters for TEs too
-                    (df.loc[te_mask, 'draft_round'] <= 3).astype(int) * 15 +
                     # Already seeing decent volume
                     (df.loc[te_mask, 'targets_per_game'].between(3, 6)) * 15 +
                     # Growing target share

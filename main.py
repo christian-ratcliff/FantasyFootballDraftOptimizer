@@ -44,6 +44,8 @@ DEBUG_MODE = False  # Enable for verbose logging
 # Processing Options
 CLUSTER_COUNT = 5  # Number of player tiers/clusters to create
 DROP_BOTTOM_TIERS = 1  # Number of bottom tiers to drop
+USE_FILTERED = True #Set use the filtered dataset in the training
+
 
 # Projection Evaluation Parameters
 VALIDATION_YEAR = 2023  # Year to use for validation
@@ -51,11 +53,12 @@ PROJECTION_YEAR = 2024  # Year to project
 PERFORM_CV = True  # Whether to perform cross-validation during model training
 
 # Caching and Reuse Options
-USE_CACHED_RAW_DATA = True  # Set to True to use previously downloaded raw data
-USE_CACHED_PROCESSED_DATA = True  # Set to True to use previously processed data
-USE_CACHED_FEATURE_SETS = True  # Set to True to use previously engineered features
-CREATE_VISUALIZATIONS = False  # Whether to generate visualization plots
+USE_CACHED_RAW_DATA = False  # Set to True to use previously downloaded raw data
+USE_CACHED_PROCESSED_DATA = False  # Set to True to use previously processed data
+USE_CACHED_FEATURE_SETS = False  # Set to True to use previously engineered features
+CREATE_VISUALIZATIONS = True  # Whether to generate visualization plots
 SKIP_MODEL_TRAINING = False  # Set to True to skip model training/evaluation
+
 
 # File Paths
 CONFIG_PATH = 'configs/league_settings.json'  # Path to optional config file
@@ -379,27 +382,38 @@ def evaluate_projections(processed_data, projections, projection_year, output_di
         if 'name_proj' in merged.columns and 'name_actual' in merged.columns:
             merged['name'] = merged['name_actual']
         
-        # Calculate evaluation metrics
-        error = merged['fantasy_points_per_game'] - merged['projected_points']
+        # Before calculating metrics, filter out players with zero or near-zero projections
+        min_projection_threshold = 0.5  # Adjust this threshold as needed
+        filtered_merged = merged[merged['projected_points'] >= min_projection_threshold].copy()
+        
+        # Log the filtering impact
+        original_count = len(merged)
+        filtered_count = len(filtered_merged)
+        logger.info(f"Filtered evaluation data from {original_count} to {filtered_count} players")
+        logger.info(f"Removed {original_count - filtered_count} players with projections below {min_projection_threshold}")
+        
+        # Use filtered data for metrics calculation
+        error = filtered_merged['fantasy_points_per_game'] - filtered_merged['projected_points']
         abs_error = error.abs()
         
         # Calculate projection accuracy metrics
         metrics = {
-            'n_players': len(merged),
+            'n_players': len(filtered_merged),
             'mae': abs_error.mean(),
             'rmse': np.sqrt((error ** 2).mean()),
             'mean_error': error.mean(),  # Positive means underprojection
             'median_error': error.median(),
             'max_error': error.max(),
             'min_error': error.min(),
+            'correlation': filtered_merged['fantasy_points_per_game'].corr(filtered_merged['projected_points']),
             'within_range': (
-                (merged['fantasy_points_per_game'] >= merged['projection_low']) & 
-                (merged['fantasy_points_per_game'] <= merged['projection_high'])
+                (filtered_merged['fantasy_points_per_game'] >= filtered_merged['projection_low']) & 
+                (filtered_merged['fantasy_points_per_game'] <= filtered_merged['projection_high'])
             ).mean() * 100  # Percentage of players whose actual points were within projected range
         }
         
         # Add player-level evaluation
-        metrics['players'] = merged.copy()
+        metrics['players'] = filtered_merged.copy()
         
         # Log results
         logger.info(f"{position} projection evaluation:")
@@ -407,30 +421,35 @@ def evaluate_projections(processed_data, projections, projection_year, output_di
         logger.info(f"  MAE: {metrics['mae']:.2f}")
         logger.info(f"  RMSE: {metrics['rmse']:.2f}")
         logger.info(f"  Mean Error: {metrics['mean_error']:.2f}")
+        logger.info(f"  Correlation: {metrics['correlation']:.3f}")
         logger.info(f"  % Within Range: {metrics['within_range']:.1f}%")
         
         # Save player-level evaluation to CSV
         merged_path = os.path.join(output_dir, f'{position}_projection_evaluation.csv')
-        merged[['name', 'projected_points', 'fantasy_points_per_game', 'projection_low', 'projection_high']].to_csv(merged_path, index=False)
+        filtered_merged[['name', 'projected_points', 'fantasy_points_per_game', 'projection_low', 'projection_high']].to_csv(merged_path, index=False)
+        
+        # Save the full (unfiltered) data too for comparison
+        unfiltered_path = os.path.join(output_dir, f'{position}_projection_evaluation_unfiltered.csv')
+        merged[['name', 'projected_points', 'fantasy_points_per_game', 'projection_low', 'projection_high']].to_csv(unfiltered_path, index=False)
         
         results[position] = metrics
         
         # Create visualization if requested
         if create_visualizations:
-            # Create scatter plot of projected vs actual
+            # Create scatter plot of projected vs actual using filtered data
             plt.figure(figsize=(10, 8))
             
             # Plot the points
             plt.scatter(
-                merged['projected_points'], 
-                merged['fantasy_points_per_game'],
+                filtered_merged['projected_points'], 
+                filtered_merged['fantasy_points_per_game'],
                 alpha=0.7
             )
             
             # Add diagonal line (perfect projection)
             max_val = max(
-                merged['projected_points'].max(),
-                merged['fantasy_points_per_game'].max()
+                filtered_merged['projected_points'].max(),
+                filtered_merged['fantasy_points_per_game'].max()
             ) * 1.1
             plt.plot([0, max_val], [0, max_val], 'r--', alpha=0.7)
             
@@ -440,7 +459,7 @@ def evaluate_projections(processed_data, projections, projection_year, output_di
             plt.title(f'{position.upper()} Projection Accuracy - {projection_year}')
             
             # Add correlation and error info
-            corr = merged['projected_points'].corr(merged['fantasy_points_per_game'])
+            corr = filtered_merged['projected_points'].corr(filtered_merged['fantasy_points_per_game'])
             plt.annotate(
                 f"Correlation: {corr:.3f}\nMAE: {metrics['mae']:.2f}",
                 xy=(0.05, 0.95),
@@ -450,7 +469,7 @@ def evaluate_projections(processed_data, projections, projection_year, output_di
             )
             
             # Add player labels for top and bottom performers
-            for _, player in merged.nlargest(3, 'fantasy_points_per_game').iterrows():
+            for _, player in filtered_merged.nlargest(3, 'fantasy_points_per_game').iterrows():
                 plt.annotate(
                     player['name'],
                     (player['projected_points'], player['fantasy_points_per_game']),
@@ -460,7 +479,7 @@ def evaluate_projections(processed_data, projections, projection_year, output_di
                     bbox=dict(boxstyle="round,pad=0.1", facecolor='lightgreen', alpha=0.7)
                 )
                 
-            for _, player in merged.nsmallest(3, 'fantasy_points_per_game').iterrows():
+            for _, player in filtered_merged.nsmallest(3, 'fantasy_points_per_game').iterrows():
                 plt.annotate(
                     player['name'],
                     (player['projected_points'], player['fantasy_points_per_game']),
@@ -474,15 +493,69 @@ def evaluate_projections(processed_data, projections, projection_year, output_di
             sns.regplot(
                 x='projected_points',
                 y='fantasy_points_per_game',
-                data=merged,
+                data=filtered_merged,
                 scatter=False,
                 line_kws={'color': 'blue'}
             )
+            
+            # Add grid for better readability
+            plt.grid(True, alpha=0.3)
             
             # Save the plot
             plt.tight_layout()
             plt.savefig(os.path.join(output_dir, f'{position}_projection_accuracy.png'))
             plt.close()
+            
+            # Also create an unfiltered version for comparison
+            if len(merged) > len(filtered_merged):
+                plt.figure(figsize=(10, 8))
+                
+                # Plot the points
+                plt.scatter(
+                    merged['projected_points'], 
+                    merged['fantasy_points_per_game'],
+                    alpha=0.7
+                )
+                
+                # Add diagonal line (perfect projection)
+                max_val = max(
+                    merged['projected_points'].max(),
+                    merged['fantasy_points_per_game'].max()
+                ) * 1.1
+                plt.plot([0, max_val], [0, max_val], 'r--', alpha=0.7)
+                
+                # Add labels and title
+                plt.xlabel('Projected Fantasy Points per Game')
+                plt.ylabel('Actual Fantasy Points per Game')
+                plt.title(f'{position.upper()} Projection Accuracy (Unfiltered) - {projection_year}')
+                
+                # Add correlation and error info
+                unfiltered_corr = merged['projected_points'].corr(merged['fantasy_points_per_game'])
+                unfiltered_mae = (merged['fantasy_points_per_game'] - merged['projected_points']).abs().mean()
+                plt.annotate(
+                    f"Correlation: {unfiltered_corr:.3f}\nMAE: {unfiltered_mae:.2f}",
+                    xy=(0.05, 0.95),
+                    xycoords='axes fraction',
+                    fontsize=12,
+                    bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8)
+                )
+                
+                # Add regression line
+                sns.regplot(
+                    x='projected_points',
+                    y='fantasy_points_per_game',
+                    data=merged,
+                    scatter=False,
+                    line_kws={'color': 'blue'}
+                )
+                
+                # Add grid for better readability
+                plt.grid(True, alpha=0.3)
+                
+                # Save the unfiltered plot
+                plt.tight_layout()
+                plt.savefig(os.path.join(output_dir, f'{position}_projection_accuracy_unfiltered.png'))
+                plt.close()
     
     # Create overall evaluation summary if requested
     if results and create_visualizations:
@@ -490,21 +563,22 @@ def evaluate_projections(processed_data, projections, projection_year, output_di
         
         # Gather metrics for all positions
         positions = list(results.keys())
-        metrics = {
+        metrics_data = {
             'MAE': [results[pos]['mae'] for pos in positions],
             'RMSE': [results[pos]['rmse'] for pos in positions],
+            'Correlation': [results[pos]['correlation'] for pos in positions],
             'Within Range (%)': [results[pos]['within_range'] for pos in positions]
         }
         
         # Create bar chart
         x = np.arange(len(positions))
-        width = 0.25
+        width = 0.2  # Narrower bars to fit more metrics
         
         fig, ax = plt.subplots(figsize=(12, 8))
-        ax.bar(x - width, metrics['MAE'], width, label='MAE')
-        ax.bar(x, metrics['RMSE'], width, label='RMSE')
-        ax.bar(x + width, metrics['Within Range (%)'], width, label='Within Range (%)')
-        
+        ax.bar(x - 1.5*width, metrics_data['MAE'], width, label='MAE')
+        ax.bar(x - 0.5*width, metrics_data['RMSE'], width, label='RMSE')
+        ax.bar(x + 0.5*width, metrics_data['Correlation'], width, label='Correlation')
+        ax.bar(x + 1.5*width, [value / 10 for value in metrics_data['Within Range (%)']], width, label='Within Range (% ÷ 10)')        
         # Add labels and title
         ax.set_xlabel('Position')
         ax.set_ylabel('Value')
@@ -513,12 +587,29 @@ def evaluate_projections(processed_data, projections, projection_year, output_di
         ax.set_xticklabels([p.upper() for p in positions])
         ax.legend()
         
+        # Add values on top of bars
+        for i, metric in enumerate(['MAE', 'RMSE', 'Correlation', 'Within Range (%)']):
+            for j, pos in enumerate(positions):
+                value = metrics_data[metric][j]
+                if metric == 'Within Range (%)':
+                    value = value / 10  # Scale down for display
+                    text = f"{metrics_data[metric][j]:.1f}%"
+                else:
+                    text = f"{value:.2f}"
+                
+                ax.text(x[j] + (i-1.5)*width, value + 0.1, text,
+                       ha='center', va='bottom', fontsize=8, rotation=45)
+        
+        # Add grid for better readability
+        ax.grid(True, alpha=0.3, axis='y')
+        
         # Save the plot
         plt.tight_layout()
         plt.savefig(os.path.join(output_dir, 'projection_metrics_summary.png'))
         plt.close()
     
     return results
+
 
 def main():
     """Main function to run the fantasy football analysis pipeline"""
@@ -646,8 +737,38 @@ def main():
         position_tier_drops = {'qb': 2, 'rb': 1, 'wr': 1, 'te': 1}
         feature_eng.cluster_players(n_clusters=CLUSTER_COUNT, position_tier_drops=position_tier_drops)
         
+        # Check if filtered feature sets were created and create them if missing
+        for position in ['qb', 'rb', 'wr', 'te']:
+            filtered_key = f"{position}_train_filtered"
+            if filtered_key not in feature_eng.feature_sets or feature_eng.feature_sets[filtered_key].empty:
+                # If filtered sets don't exist, create them manually
+                logger.warning(f"Creating missing {filtered_key} feature set manually")
+                train_key = f"{position}_train"
+                if train_key in feature_eng.feature_sets and not feature_eng.feature_sets[train_key].empty:
+                    # Copy the unfiltered dataset as a fallback
+                    feature_eng.feature_sets[filtered_key] = feature_eng.feature_sets[train_key].copy()
+                    
+                    # Add required columns if missing
+                    if 'tier' not in feature_eng.feature_sets[filtered_key].columns:
+                        # Create a basic tier assignment
+                        if 'fantasy_points_per_game' in feature_eng.feature_sets[filtered_key].columns:
+                            # Divide players into tiers based on fantasy points
+                            feature_eng.feature_sets[filtered_key]['cluster'] = 0  # Default cluster
+                            feature_eng.feature_sets[filtered_key]['tier'] = 'Mid Tier'  # Default tier
+                            
+                            # Assign Elite tier to top players
+                            top_mask = feature_eng.feature_sets[filtered_key]['fantasy_points_per_game'] > \
+                                feature_eng.feature_sets[filtered_key]['fantasy_points_per_game'].quantile(0.8)
+                            feature_eng.feature_sets[filtered_key].loc[top_mask, 'tier'] = 'Elite'
+                        else:
+                            # If no fantasy points, just use default tier
+                            feature_eng.feature_sets[filtered_key]['cluster'] = 0
+                            feature_eng.feature_sets[filtered_key]['tier'] = 'Mid Tier'
+                    
+                    logger.info(f"Created fallback {filtered_key} feature set with {len(feature_eng.feature_sets[filtered_key])} rows")
+        
         # Finalize features with filtering applied
-        feature_eng.finalize_features(apply_filtering=True)
+        feature_eng.finalize_features(apply_filtering=USE_FILTERED)
         
         # Get processed feature sets
         feature_sets = feature_eng.get_feature_sets()
@@ -700,14 +821,15 @@ def main():
         logger.info("Step 6: Training and evaluating projection models...")
         
         # Initialize the projection model
-        projection_model = PlayerProjectionModel(feature_sets, output_dir=MODELS_DIR, use_filtered=False)
+        projection_model = PlayerProjectionModel(feature_sets, output_dir=MODELS_DIR, use_filtered=USE_FILTERED)
 
         
         # Train models for all positions with proper validation
         all_metrics = projection_model.train_all_positions(
             model_type='random_forest',
             validation_season=VALIDATION_YEAR,
-            perform_cv=PERFORM_CV
+            perform_cv=PERFORM_CV,
+            evaluate_overfit=True 
         )
         
         # Log validation metrics
@@ -718,13 +840,10 @@ def main():
         # Create projection filters for specific year evaluation
         projection_filters = {}
         for position in ['qb', 'rb', 'wr', 'te']:
-            # We need to get all unfiltered data for the projection year to properly evaluate
-            train_key = f"{position}_train"  # Use unfiltered data for broader evaluation
-            if train_key in feature_sets and not feature_sets[train_key].empty:
-                train_data = feature_sets[train_key].copy()
-                projection_data = train_data[train_data['season'] == PROJECTION_YEAR]
-                if not projection_data.empty:
-                    projection_filters[position] = projection_data
+            # Look for projection data in the correct feature sets (position_projection)
+            projection_key = f"{position}_projection"  # Use projection data directly
+            if projection_key in feature_sets and not feature_sets[projection_key].empty:
+                projection_filters[position] = feature_sets[projection_key]
         
         # Generate projections
         logger.info(f"Generating projections for {PROJECTION_YEAR}...")

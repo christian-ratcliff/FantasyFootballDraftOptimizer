@@ -164,7 +164,7 @@ class PlayerProjectionModel:
         return X_train, X_val, y_train, y_val, features, train_data, train_mask
 
     def train_with_validation(self, position, model_type='random_forest', validation_season=None, 
-                            hyperparams=None, perform_cv=True):
+                            hyperparams=None, perform_cv=True, evaluate_overfit=True):
         """
         Train model with proper validation
         
@@ -180,6 +180,8 @@ class PlayerProjectionModel:
             Model hyperparameters (if not provided, defaults will be used)
         perform_cv : bool
             Whether to perform cross-validation (slower but more robust)
+        evaluate_overfit : bool
+            Whether to run overfitting detection analysis
             
         Returns:
         --------
@@ -358,10 +360,19 @@ class PlayerProjectionModel:
         # Save the model
         self.save_model(position)
         
+        # Run overfitting detection if requested
+        if evaluate_overfit:
+            logger.info(f"Running overfitting detection for {position} model...")
+            overfitting_results = self.evaluate_overfitting(position)
+            # Store overfitting results with the model
+            if overfitting_results:
+                self.models[position]['overfitting_analysis'] = overfitting_results
+        
         return val_metrics
 
+
     def train_all_positions(self, model_type='random_forest', validation_season=None, 
-                           hyperparams=None, perform_cv=True):
+                        hyperparams=None, perform_cv=True, evaluate_overfit=True):
         """
         Train models for all positions
         
@@ -375,6 +386,8 @@ class PlayerProjectionModel:
             Model hyperparameters
         perform_cv : bool
             Whether to perform cross-validation
+        evaluate_overfit : bool
+            Whether to run overfitting detection analysis
             
         Returns:
         --------
@@ -389,7 +402,8 @@ class PlayerProjectionModel:
                 model_type=model_type,
                 validation_season=validation_season,
                 hyperparams=hyperparams,
-                perform_cv=perform_cv
+                perform_cv=perform_cv,
+                evaluate_overfit=evaluate_overfit
             )
             
             if metrics:
@@ -416,6 +430,178 @@ class PlayerProjectionModel:
         logger.warning("train_position is deprecated, use train_with_validation instead")
         self.train_with_validation(position, model_type=model_type, perform_cv=False)
         return self
+    
+    
+    def evaluate_overfitting(self, position):
+        """
+        Run comprehensive overfitting detection for a specific position model
+        
+        Parameters:
+        -----------
+        position : str
+            Position to evaluate ('qb', 'rb', 'wr', 'te')
+            
+        Returns:
+        --------
+        dict
+            Dictionary with all evaluation results
+        """
+        from src.models.model_evaluation import (
+            evaluate_model_fit, plot_learning_curves, analyze_feature_importance,
+            temporal_validation, cross_validation_analysis
+        )
+        
+        # Check if model exists
+        if position not in self.models:
+            logger.warning(f"No model found for {position}. Train the model first.")
+            return None
+        
+        # Get model info
+        model_info = self.models[position]
+        model = model_info['model']
+        features = model_info['features']
+        
+        # Create output directory for evaluation results
+        eval_dir = os.path.join(self.output_dir, 'evaluation', position)
+        os.makedirs(eval_dir, exist_ok=True)
+        
+        # We need to get training and validation data
+        # Create proper train/validation split using previous method
+        result = self.create_train_validation_split(position)
+        
+        if result is None or len(result) < 5:
+            logger.warning(f"Could not create train/validation split for {position}")
+            return None
+            
+        X_train, X_val, y_train, y_val, features, train_data, train_mask = result
+        
+        if X_train is None or X_val is None:
+            logger.warning(f"Invalid train/validation data for {position}")
+            return None
+        
+        # Initialize results dictionary
+        results = {}
+        
+        # 1. Basic train/validation comparison
+        logger.info(f"Evaluating train/validation fit for {position}...")
+        model_fit = evaluate_model_fit(model, X_train, y_train, X_val, y_val)
+        results['model_fit'] = model_fit
+        
+        # 2. Learning curves
+        logger.info(f"Generating learning curves for {position}...")
+        learning_curve_path = os.path.join(eval_dir, 'learning_curve.png')
+        _, learning_curve_data = plot_learning_curves(
+            model, X_train, y_train, 
+            cv=5, 
+            output_path=learning_curve_path
+        )
+        results['learning_curve'] = learning_curve_data
+        
+        # 3. Feature importance analysis
+        logger.info(f"Analyzing feature importance for {position}...")
+        importance_path = os.path.join(eval_dir, 'feature_importance.png')
+        _, importance_df = analyze_feature_importance(
+            model, features, 
+            output_path=importance_path
+        )
+        if importance_df is not None:
+            # Save feature importance to CSV
+            importance_csv = os.path.join(eval_dir, 'feature_importance.csv')
+            importance_df.to_csv(importance_csv, index=False)
+            results['feature_importance'] = importance_df.to_dict(orient='records')
+        
+        # 4. Temporal validation (across seasons)
+        if 'season' in train_data.columns:
+            logger.info(f"Running temporal validation for {position}...")
+            seasons = sorted(train_data['season'].unique())
+            
+            if len(seasons) >= 3:  # Need at least 3 seasons for meaningful validation
+                temporal_path = os.path.join(eval_dir, 'temporal_validation.png')
+                _, temporal_df = temporal_validation(
+                    model, train_data, seasons, features,
+                    target='fantasy_points_per_game',
+                    output_path=temporal_path
+                )
+                
+                if temporal_df is not None:
+                    # Save temporal validation to CSV
+                    temporal_csv = os.path.join(eval_dir, 'temporal_validation.csv')
+                    temporal_df.to_csv(temporal_csv, index=False)
+                    results['temporal_validation'] = temporal_df.to_dict(orient='records')
+        
+        # 5. Cross-validation analysis
+        logger.info(f"Running cross-validation analysis for {position}...")
+        cv_path = os.path.join(eval_dir, 'cross_validation.png')
+        _, cv_results = cross_validation_analysis(
+            model, X_train, y_train, 
+            cv=5,
+            output_path=cv_path
+        )
+        results['cross_validation'] = cv_results
+        
+        # Save the combined results
+        results_path = os.path.join(eval_dir, 'overfitting_evaluation.json')
+        import json
+        
+        # Convert numpy arrays and other non-serializable types
+        def json_serialize(obj):
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, np.int64):
+                return int(obj)
+            if isinstance(obj, np.float64):
+                return float(obj)
+            raise TypeError(f"Type {type(obj)} not serializable")
+        
+        try:
+            with open(results_path, 'w') as f:
+                json.dump(results, f, default=json_serialize, indent=2)
+            logger.info(f"Saved overfitting evaluation results to {results_path}")
+        except Exception as e:
+            logger.error(f"Error saving overfitting evaluation results: {e}")
+        
+        # Log overall assessment
+        self._log_overfitting_assessment(results)
+        
+        return results
+
+    def _log_overfitting_assessment(self, results):
+        """Log an overall assessment of overfitting based on evaluation results"""
+        if not results or 'model_fit' not in results:
+            return
+        
+        # Extract key metrics
+        model_fit = results['model_fit']
+        r2_gap = model_fit['r2_gap']
+        rmse_gap = model_fit['rmse_gap']
+        
+        # Create assessment
+        overfitting_signals = []
+        
+        # Check train/validation gap
+        if r2_gap > 0.2:
+            overfitting_signals.append(f"Large R² gap between train and validation ({r2_gap:.2f})")
+        
+        # Check learning curve if available
+        if 'learning_curve' in results:
+            lc = results['learning_curve']
+            if lc['final_gap'] < -1.0:  # Negative gap means validation error > training error
+                overfitting_signals.append(f"Large final gap in learning curve ({lc['final_gap']:.2f})")
+        
+        # Check cross-validation results if available
+        if 'cross_validation' in results:
+            cv = results['cross_validation']
+            r2_ratio = cv['test_r2_std'] / max(abs(cv['test_r2_mean']), 0.01)
+            if r2_ratio > 0.2:
+                overfitting_signals.append(f"High variance in CV R² scores (std/mean: {r2_ratio:.2f})")
+        
+        # Log assessment
+        if overfitting_signals:
+            logger.warning("OVERFITTING ASSESSMENT: Potential overfitting detected")
+            for signal in overfitting_signals:
+                logger.warning(f"  - {signal}")
+        else:
+            logger.info("OVERFITTING ASSESSMENT: No strong signals of overfitting detected")
     
     def project_players(self, position, data):
         """
@@ -447,12 +633,14 @@ class PlayerProjectionModel:
         # Create a copy of data
         prediction_data = data.copy()
         
-        # Handle feature selection as in the original code (abbreviated)...
+        # Check for missing features
         missing_features = [f for f in features if f not in prediction_data.columns]
         if missing_features:
+            logger.warning(f"Missing features for {position}: {missing_features}")
             # Use only available features
             available_features = [f for f in features if f in prediction_data.columns]
             if len(available_features) < 3:
+                logger.warning(f"Not enough features for {position} projection, need at least 3")
                 # Handle insufficient features
                 prediction_data['projected_points'] = np.nan
                 prediction_data['projection_low'] = np.nan
@@ -547,22 +735,138 @@ class PlayerProjectionModel:
         prediction_data = self._apply_specialized_adjustments(position, prediction_data)
         
         # Add projection tiers based on projected points
-        prediction_data['projection_tier'] = pd.qcut(
-            prediction_data['projected_points'].clip(lower=0.1), 
-            5, 
-            labels=['Tier 5', 'Tier 4', 'Tier 3', 'Tier 2', 'Tier 1']
-        )
-        
+        try:
+            # First determine how many unique values we have
+            prediction_data['projected_points_for_tiers'] = prediction_data['projected_points'].clip(lower=0.1)
+            unique_values = prediction_data['projected_points_for_tiers'].nunique()
+            
+            if unique_values >= 5:
+                # We have enough unique values for 5 bins
+                try:
+                    prediction_data['projection_tier'] = pd.qcut(
+                        prediction_data['projected_points_for_tiers'], 
+                        5, 
+                        labels=['Tier 5', 'Tier 4', 'Tier 3', 'Tier 2', 'Tier 1'],
+                        duplicates='drop'
+                    )
+                except ValueError as e:
+                    logger.warning(f"Error using qcut: {e}. Falling back to manual tiering.")
+                    # If qcut fails, fall back to manual tiering
+                    unique_values = 1  # Force manual tiering
+            
+            if unique_values < 5:
+                # Not enough unique values, use manual assignment
+                logger.info(f"Only {unique_values} unique projection values, using manual tiering")
+                
+                # Create simple tier boundaries based on fixed point values
+                prediction_data['projection_tier'] = 'Tier 3'  # Default tier
+                
+                max_val = prediction_data['projected_points'].max()
+                min_val = max(prediction_data['projected_points'].min(), 0.1)
+                
+                # Only continue if we have a valid range
+                if max_val > min_val:
+                    # Calculate simple percentile-based cutoffs
+                    cutoffs = [
+                        min_val,
+                        min_val + (max_val - min_val) * 0.2,
+                        min_val + (max_val - min_val) * 0.4,
+                        min_val + (max_val - min_val) * 0.6,
+                        min_val + (max_val - min_val) * 0.8,
+                        max_val
+                    ]
+                    
+                    # Make sure all cutoffs are unique
+                    cutoffs = sorted(list(set(cutoffs)))
+                    
+                    # Only proceed with tiering if we have enough unique cutoffs
+                    if len(cutoffs) > 1:
+                        # Ensure we have matching number of labels and bins
+                        tier_labels = ['Tier 5', 'Tier 4', 'Tier 3', 'Tier 2', 'Tier 1'][:len(cutoffs)-1]
+                        
+                        # Manual assignment based on thresholds
+                        for i in range(len(tier_labels)):
+                            lower = cutoffs[i]
+                            upper = cutoffs[i+1]
+                            mask = (prediction_data['projected_points'] >= lower)
+                            if i < len(tier_labels) - 1:
+                                mask &= (prediction_data['projected_points'] < upper)
+                            else:
+                                mask &= (prediction_data['projected_points'] <= upper)
+                            
+                            prediction_data.loc[mask, 'projection_tier'] = tier_labels[i]
+        except Exception as e:
+            logger.warning(f"Could not create projection tiers: {e}")
+            # Fallback to simple manual assignment
+            prediction_data['projection_tier'] = 'Tier 3'  # Default tier
+
+        # Clean up temporary columns
+        if 'projected_points_for_tiers' in prediction_data.columns:
+            prediction_data = prediction_data.drop(columns=['projected_points_for_tiers'])
+
         # Add breakout tier for players with high ceiling relative to baseline
-        prediction_data['ceiling_to_base_ratio'] = prediction_data['ceiling_projection'] / prediction_data['projected_points'].clip(lower=0.1)
-        prediction_data['breakout_tier'] = pd.qcut(
-            prediction_data['ceiling_to_base_ratio'].clip(lower=1.0, upper=2.0),
-            5, 
-            labels=['Low Ceiling', 'Below Avg Ceiling', 'Average Ceiling', 'High Ceiling', 'Breakout Potential']
-        )
+        try:
+            # Calculate ceiling to base ratio
+            prediction_data['ceiling_to_base_ratio'] = prediction_data['ceiling_projection'] / prediction_data['projected_points'].clip(lower=0.1)
+            
+            # Clip values to reasonable range and create a temporary column for tiering
+            prediction_data['ceiling_ratio_for_tiers'] = prediction_data['ceiling_to_base_ratio'].clip(lower=1.0, upper=2.0)
+            
+            # First determine how many unique values we have
+            unique_values = prediction_data['ceiling_ratio_for_tiers'].nunique()
+            
+            if unique_values >= 5:
+                # We have enough unique values for 5 bins
+                try:
+                    prediction_data['breakout_tier'] = pd.qcut(
+                        prediction_data['ceiling_ratio_for_tiers'],
+                        5, 
+                        labels=['Low Ceiling', 'Below Avg Ceiling', 'Average Ceiling', 'High Ceiling', 'Breakout Potential'],
+                        duplicates='drop'
+                    )
+                except ValueError as e:
+                    logger.warning(f"Error using qcut for breakout tiers: {e}. Falling back to manual tiering.")
+                    # If qcut fails, fall back to manual tiering
+                    unique_values = 1  # Force manual tiering
+            
+            if unique_values < 5:
+                # Not enough unique values, use manual assignment
+                logger.info(f"Only {unique_values} unique ceiling ratio values, using manual tiering")
+                
+                # Create simple tier assignments based on fixed ratio values
+                prediction_data['breakout_tier'] = 'Average Ceiling'  # Default tier
+                
+                # Define breakout tier thresholds
+                ratio_thresholds = {
+                    'Low Ceiling': 1.0,
+                    'Below Avg Ceiling': 1.2,
+                    'Average Ceiling': 1.4,
+                    'High Ceiling': 1.6,
+                    'Breakout Potential': 1.8
+                }
+                
+                # Apply thresholds
+                for tier, threshold in ratio_thresholds.items():
+                    if tier == 'Low Ceiling':
+                        prediction_data.loc[prediction_data['ceiling_ratio_for_tiers'] < threshold, 'breakout_tier'] = tier
+                    elif tier == 'Breakout Potential':
+                        prediction_data.loc[prediction_data['ceiling_ratio_for_tiers'] >= threshold, 'breakout_tier'] = tier
+                    else:
+                        next_tier = list(ratio_thresholds.keys())[list(ratio_thresholds.keys()).index(tier) + 1]
+                        next_threshold = ratio_thresholds[next_tier]
+                        prediction_data.loc[(prediction_data['ceiling_ratio_for_tiers'] >= threshold) & 
+                                        (prediction_data['ceiling_ratio_for_tiers'] < next_threshold), 'breakout_tier'] = tier
+                    
+        except Exception as e:
+            logger.warning(f"Could not create breakout tiers: {e}")
+            # Fallback to simple assignment
+            prediction_data['breakout_tier'] = 'Average Ceiling'  # Default tier
+
+        # Clean up temporary columns
+        if 'ceiling_ratio_for_tiers' in prediction_data.columns:
+            prediction_data = prediction_data.drop(columns=['ceiling_ratio_for_tiers'])
         
         return prediction_data
-
 
     def _apply_specialized_adjustments(self, position, prediction_data):
         """

@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """
-Fantasy Football Draft Optimizer - Main Script
+Fantasy Football Draft Optimizer
 
-This script orchestrates the complete data analysis pipeline by calling functions
-from the various modules in the project.
+This script orchestrates the complete data analysis pipeline:
+1. Loads data from NFL data sources
+2. Extracts league settings from ESPN API
+3. Engineers features for player performance prediction
+4. Performs clustering and tier-based analysis
+5. Creates comprehensive visualizations
 """
 
 import os
@@ -11,216 +15,227 @@ import json
 import pandas as pd
 import logging
 from datetime import datetime
+import sys
 import warnings
 warnings.filterwarnings('ignore')
 
+#######################################################
+# CONFIGURATION - Modify these parameters as needed
+#######################################################
 
-# Import from project modules
-from src.data.loader import (
-    load_espn_league_data,
-    load_nfl_historical_data,
-    load_nfl_current_season_data,
-    clean_and_merge_all_data
-)
-from src.analysis.analyzer import FantasyFootballAnalyzer
-from src.analysis.visualizer import FantasyDataVisualizer
-from src.features.engineering import FeatureEngineering
-from src.features.engineering_extensions import FeatureEngineeringExtensions
+# ESPN League Information
+LEAGUE_ID = 697625923  # Your ESPN fantasy league ID
+LEAGUE_YEAR = 2024  # The year to analyze
+
+# ESPN Credentials (required for private leagues)
+ESPN_S2 = "AECeHAkR7FZuTvVWSEnMRIA29wVeroZhvd7fHHy5tZvIUdIp4XIZaglA17V6g2rulDDFMCUiC%2BpeXNqWzEJTpjTJsz5Zv2DTMOIjeX0JrC6CYs8kDidYeF0HHkI78OG2O%2Bs6f%2FUPVSwXRBZEGMKPDdKl%2BE0a7na225JN4bC80tD9RXFv32kqqtEk%2Bgw1hgQ968ARiAdt69axAvjryW57rj58sYK4oMJPxjtPbh9tATi%2BSI2AmQ0dNPXZfRTA%2FFgCtgzyxWNwbKT2boYeDfFe7rm8idW47lnavsfYGwWjVpddVY6%2BcupF7uoc9AeVFQ5xNUY%3D"  # Your ESPN_S2 cookie value
+SWID = "{42614A28-F6F5-4052-A14A-28F6F52052AF}"  # Your SWID cookie value 
+
+# Data Analysis Parameters
+START_YEAR = 2016  # First year to include in historical analysis
+INCLUDE_NGS = True  # Whether to include Next Gen Stats (slower but more accurate)
+CREATE_VISUALIZATIONS = True  # Whether to generate visualization plots
+DEBUG_MODE = False  # Enable for verbose logging
+
+# Processing Options
+CLUSTER_COUNT = 5  # Number of player tiers/clusters to create
+DROP_BOTTOM_TIERS = 1  # Number of bottom tiers to drop
+
+# File Paths
+CONFIG_PATH = 'configs/league_settings.json'  # Path to optional config file
+DATA_DIR = 'data'  # Base directory for all data
+OUTPUT_DIR = os.path.join(DATA_DIR, 'outputs')  # Directory for visualizations
+
+#######################################################
+# END OF CONFIGURATION
+#######################################################
 
 # Set up logging
+log_level = logging.DEBUG if DEBUG_MODE else logging.INFO
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_level,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler("fantasy_football.log"),
-        logging.StreamHandler()
+        logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger("fantasy_football")
 
-def main():
-    """Main function to run the fantasy football analysis pipeline"""
-    # Load configuration
-    config_path = "configs/league_settings.json"
+# Import project modules
+from src.data.loader import (
+    load_espn_league_data,
+    load_nfl_data,
+    process_player_data
+)
+from src.features.engineering import FantasyFeatureEngineering
+from src.analysis.visualizer import FantasyDataVisualizer
+
+def load_config(config_path):
+    """Load configuration from file"""
     try:
         with open(config_path, 'r') as f:
-            config = json.load(f)
-        
-        league_id = config['league_id']
-        year = config['year']
-        espn_s2 = config.get('espn_s2')
-        swid = config.get('swid')
-    except FileNotFoundError:
-        logger.warning(f"Config file {config_path} not found. Please run generate_config.py")
-        
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        logger.warning(f"Error loading config file: {e}")
+        return {}
+
+def main():
+    """Main function to run the fantasy football analysis pipeline"""
+    start_time = datetime.now()
+    logger.info(f"Starting fantasy football analysis at {start_time}")
+    
+    # Load configuration from file (optional, will use defaults if not found)
+    config = load_config(CONFIG_PATH)
+    
+    # Use config values if available, otherwise use the ones defined at the top
+    league_id = config.get('league_id', LEAGUE_ID)
+    year = config.get('year', LEAGUE_YEAR)
+    espn_s2 = config.get('espn_s2', ESPN_S2)
+    swid = config.get('swid', SWID)
+    start_year = config.get('start_year', START_YEAR)
+    
+    if league_id is None:
+        logger.error("League ID is required. Set LEAGUE_ID at the top of the script.")
+        return
     
     # Create output directories
-    data_dir = 'data'
-    raw_dir = os.path.join(data_dir, 'raw')
-    processed_dir = os.path.join(data_dir, 'processed')
-    output_dir = os.path.join(data_dir, 'outputs')
-    feature_dir = os.path.join(output_dir, 'feature_analysis')
+    raw_dir = os.path.join(DATA_DIR, 'raw')
+    processed_dir = os.path.join(DATA_DIR, 'processed')
     
-    for directory in [data_dir, raw_dir, processed_dir, output_dir, feature_dir]:
+    for directory in [DATA_DIR, raw_dir, processed_dir, OUTPUT_DIR]:
         os.makedirs(directory, exist_ok=True)
     
     # Step 1: Load league data from ESPN
-    logger.info("Step 1: Loading ESPN league data...")
+    logger.info(f"Step 1: Loading ESPN league data for league {league_id}, year {year}...")
     league_data = load_espn_league_data(league_id, year, espn_s2, swid)
     
     # Save league data
     with open(os.path.join(raw_dir, 'league_data.json'), 'w') as f:
-        # Convert DataFrame to dictionary for JSON serialization
-        league_data_json = league_data.copy()
-        if 'teams' in league_data_json and isinstance(league_data_json['teams'], pd.DataFrame):
+        # Convert DataFrame to list for JSON serialization
+        if 'teams' in league_data and isinstance(league_data['teams'], pd.DataFrame):
+            league_data_json = league_data.copy()
             league_data_json['teams'] = league_data_json['teams'].to_dict(orient='records')
-        json.dump(league_data_json, f, indent=2)
+            json.dump(league_data_json, f, indent=2)
+        else:
+            json.dump(league_data, f, indent=2)
     
-    # Step 2: Load historical NFL data
-    logger.info("Step 2: Loading historical NFL data...")
-    historical_years = list(range(year-7, year))
-    historical_data = load_nfl_historical_data(historical_years)
+    # Step 2: Load NFL data from nfl_data_py
+    logger.info(f"Step 2: Loading NFL data for years {start_year}-{year}...")
+    years = list(range(start_year, year + 1))
     
-    # Save key historical data
-    for key, df in historical_data.items():
-        if not df.empty and isinstance(df, pd.DataFrame):
-            df.to_csv(os.path.join(raw_dir, f"historical_{key}.csv"), index=False)
-    
-    # Step 3: Load current season NFL data
-    logger.info("Step 3: Loading current season NFL data...")
-    current_data = load_nfl_current_season_data(year)
-    
-    # Save key current data
-    for key, df in current_data.items():
-        if not df.empty and isinstance(df, pd.DataFrame):
-            df.to_csv(os.path.join(raw_dir, f"current_{key}.csv"), index=False)
-    
-    # Step 4: Clean and merge data
-    logger.info("Step 4: Cleaning and merging all data...")
-    merged_data = clean_and_merge_all_data(historical_data, current_data)
-    
-    # Save merged data
-    for key, df in merged_data.items():
-        if not df.empty:
-            df.to_csv(os.path.join(processed_dir, f"{key}.csv"), index=False)
-    
-    # Step 5: Initialize analyzer
-    logger.info("Step 5: Initializing fantasy football analyzer...")
-    analyzer = FantasyFootballAnalyzer(
-        league_id=league_id,
-        year=year,
-        espn_s2=espn_s2,
-        swid=swid
+    nfl_data = load_nfl_data(
+        years=years,
+        include_ngs=INCLUDE_NGS,
+        ngs_min_year=2016,
+        use_threads=True
     )
     
-    # Load data into analyzer
-    if league_data:
-        if 'league_info' in league_data:
-            analyzer.settings = league_data['league_info']
-        analyzer.scoring_format = league_data['scoring_settings']
-        analyzer.roster_positions = league_data['roster_settings']
+    # Save raw data
+    for key, df in nfl_data.items():
+        if not df.empty and isinstance(df, pd.DataFrame):
+            output_path = os.path.join(raw_dir, f"{key}.csv")
+            df.to_csv(output_path, index=False)
+            logger.info(f"Saved raw {key} data to {output_path}")
     
-    if 'all_seasonal' in merged_data:
-        analyzer.historical_data = {
-            'seasonal': merged_data['all_seasonal'],
-            'player_ids': historical_data.get('player_ids', pd.DataFrame()),
-            'weekly': historical_data.get('weekly', pd.DataFrame())
-        }
-    
-    # Step 6: Preprocess data
-    logger.info("Step 6: Preprocessing data...")
-    preprocessed_data = analyzer.preprocess_data()
-    
-    # Save preprocessed data
-    for key, df in preprocessed_data.items():
-        df.to_csv(os.path.join(processed_dir, f"preprocessed_{key}.csv"), index=False)
-    
-    # Step 7: Feature engineering
-    logger.info("Step 7: Applying basic feature engineering...")
-    feature_eng = FeatureEngineering(preprocessed_data)
-    
-    # Apply feature engineering steps
-    feature_eng.create_positional_features() \
-              .create_trend_features() \
-              .create_age_features() \
-              .handle_missing_values() \
-              .normalize_features()
-    
-    # Step 7b: Apply enhanced feature engineering with clustering (using 5 clusters)
-    logger.info("Step 7b: Applying enhanced feature engineering with clustering...")
-    
-    # Apply clustering before other visualizations to enable filtering
-    logger.info("Creating player clusters...")
-    positions = ['QB', 'RB', 'WR', 'TE']
-    for position in positions:
-        logger.info(f"Creating clusters for {position}...")
-        feature_eng.create_cluster_features(position=position, n_clusters=5)
-    
-    # Apply advanced feature engineering extensions
-    logger.info("Applying advanced feature engineering...")
-    feature_eng_ext = FeatureEngineeringExtensions(feature_eng)
-    
-    # Add NGS data features if available
-    ngs_data = {
-        'ngs_passing': merged_data.get('ngs_passing', pd.DataFrame()),
-        'ngs_rushing': merged_data.get('ngs_rushing', pd.DataFrame()),
-        'ngs_receiving': merged_data.get('ngs_receiving', pd.DataFrame())
-    }
-    
-    # Create advanced metrics and interactions
-    feature_eng_ext.create_advanced_ngs_features(ngs_data) \
-                  .create_fantasy_scoring_features(league_data['scoring_settings']) \
-                  .create_interaction_features(top_n=15) \
-                  .analyze_feature_importance() \
-                  .visualize_feature_importance(output_dir=feature_dir) \
-                  .analyze_feature_correlations() \
-                  .visualize_feature_correlations(output_dir=feature_dir) \
-                  .remove_multicollinear_features() \
-                  .select_best_features()
-    
-    # Get the fully processed data
-    processed_data = feature_eng_ext.get_processed_data()
+    # Step 3: Process player data
+    logger.info("Step 3: Processing player data...")
+    processed_data = process_player_data(nfl_data)
     
     # Save processed data
     for key, df in processed_data.items():
-        df.to_csv(os.path.join(processed_dir, f"engineered_{key}.csv"), index=False)
+        if not df.empty and isinstance(df, pd.DataFrame):
+            output_path = os.path.join(processed_dir, f"{key}.csv")
+            df.to_csv(output_path, index=False)
+            logger.info(f"Saved processed {key} data to {output_path}")
     
-    feature_eng_ext.save_feature_engineered_data(output_dir=processed_dir)
+    # Step 4: Feature engineering
+    logger.info("Step 4: Performing feature engineering...")
+    feature_eng = FantasyFeatureEngineering(processed_data, target_year=year)
     
-    # Step 8: Create visualizations
-    logger.info("Step 8: Creating visualizations...")
+    # Create position-specific features
+    feature_eng.create_position_features()
     
-    # Create enhanced visualizer with updated player age filtering and top cluster filtering
-    visualizer = FantasyDataVisualizer(
-        merged_data, 
-        output_dir=output_dir, 
-        current_year=year
-    )
+    # Prepare prediction features
+    feature_eng.prepare_prediction_features()
     
-    # Run all visualizations - now with improved clustering and filtering
-    visualizer.run_all_visualizations()
+    # Perform clustering
+    feature_eng.cluster_players(n_clusters=CLUSTER_COUNT, drop_tiers=DROP_BOTTOM_TIERS)
     
-    # Save all data for later use
-    analyzer.save_data(os.path.join(processed_dir, 'fantasy_football_data.pkl'))
+    # Finalize features
+    feature_eng.finalize_features(apply_filtering=True)
     
-    logger.info("Analysis pipeline completed successfully!")
+    # Get processed feature sets
+    feature_sets = feature_eng.get_feature_sets()
     
-    return {
-        "league_data": league_data,
-        "merged_data": merged_data,
-        "preprocessed_data": preprocessed_data,
-        "processed_data": processed_data
-    }
-
-if __name__ == "__main__":
-    start_time = datetime.now()
-    logger.info(f"Starting fantasy football analysis at {start_time}")
+    # Save feature sets
+    for key, df in feature_sets.items():
+        if not df.empty and isinstance(df, pd.DataFrame):
+            output_path = os.path.join(processed_dir, f"features_{key}.csv")
+            df.to_csv(output_path, index=False)
+            logger.info(f"Saved feature set {key} to {output_path}")
     
-    results = main()
+    # Get cluster models
+    cluster_models = feature_eng.get_cluster_models()
     
+    # Step 5: Create visualizations
+    if CREATE_VISUALIZATIONS:
+        logger.info("Step 5: Creating visualizations...")
+        visualizer = FantasyDataVisualizer(
+            data_dict=processed_data,
+            feature_sets=feature_sets,
+            output_dir=OUTPUT_DIR
+        )
+        
+        # Run all visualizations
+        visualizer.run_all_visualizations(league_data)
+    else:
+        logger.info("Skipping visualizations as specified in configuration")
+    
+    # Summarize results
     end_time = datetime.now()
     duration = end_time - start_time
     logger.info(f"Analysis completed in {duration}")
     
-    print(f"\nAnalysis completed successfully in {duration}!")
-    print(f"Output data and visualizations saved to the 'data' directory.")
+    # Display summary of analysis
+    print("\n========== Fantasy Football Analysis Summary ==========")
+    print(f"League: {league_data.get('league_info', {}).get('name', 'Unknown')}")
+    print(f"Teams: {league_data.get('league_info', {}).get('team_count', 'Unknown')}")
+    print(f"Analysis years: {min(years)}-{max(years)}")
+    
+    # Count players in each position tier after filtering
+    for position in ['qb', 'rb', 'wr', 'te']:
+        tier_key = f"{position}_train_filtered"
+        if tier_key in feature_sets and not feature_sets[tier_key].empty:
+            tier_counts = feature_sets[tier_key]['tier'].value_counts()
+            print(f"\n{position.upper()} Tier distribution:")
+            for tier, count in tier_counts.items():
+                print(f"  {tier}: {count} players")
+    
+    # Highlight top players in each position
+    print("\nTop players by position after tier filtering:")
+    for position in ['qb', 'rb', 'wr', 'te']:
+        tier_key = f"{position}_train_filtered"
+        if tier_key in feature_sets and not feature_sets[tier_key].empty:
+            if 'fantasy_points_per_game' in feature_sets[tier_key].columns and 'name' in feature_sets[tier_key].columns:
+                top_players = feature_sets[tier_key].nlargest(5, 'fantasy_points_per_game')
+                print(f"\nTop 5 {position.upper()} players:")
+                for _, player in top_players.iterrows():
+                    print(f"  {player['name']}: {player['fantasy_points_per_game']:.2f} pts/game")
+    
+    print("\nAnalysis completed successfully!")
+    print(f"Output data and visualizations saved to the '{DATA_DIR}' directory")
+    print("\nNext steps:")
+    print("1. Review visualizations in data/outputs/")
+    print("2. Run the draft simulation module (coming soon)")
+    print("3. Use the draft helper GUI during your draft (coming soon)")
+    
+    return {
+        "league_data": league_data,
+        "processed_data": processed_data,
+        "feature_sets": feature_sets,
+        "cluster_models": cluster_models
+    }
+
+if __name__ == "__main__":
+    main()

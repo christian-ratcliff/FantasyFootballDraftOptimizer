@@ -7,12 +7,15 @@ import nfl_data_py as nfl
 from espn_api.football import League
 import logging
 import numpy as np
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 
 logger = logging.getLogger(__name__)
 
 def load_espn_league_data(league_id, year, espn_s2=None, swid=None):
     """
-    Load league data from ESPN API
+    Load league data from ESPN API - ONLY for scoring settings and roster rules
     
     Parameters:
     -----------
@@ -28,10 +31,24 @@ def load_espn_league_data(league_id, year, espn_s2=None, swid=None):
     Returns:
     --------
     dict
-        Dictionary containing league data and settings
+        Dictionary containing league settings
     """
     # Initialize connection to ESPN league
-    league = League(league_id=league_id, year=year, espn_s2=espn_s2, swid=swid)
+    try:
+        league = League(league_id=league_id, year=year, espn_s2=espn_s2, swid=swid)
+    except Exception as e:
+        logger.error(f"Error connecting to ESPN league: {e}")
+        logger.info("Creating default league settings")
+        return {
+            'league_info': {
+                'name': 'Default League',
+                'team_count': 10,
+                'playoff_teams': 6
+            },
+            'scoring_settings': {},
+            'roster_settings': {},
+            'teams': pd.DataFrame()
+        }
     
     # Extract relevant league settings
     settings = league.settings
@@ -54,7 +71,7 @@ def load_espn_league_data(league_id, year, espn_s2=None, swid=None):
             'division': team.division_name
         })
     
-    logger.info(f"Successfully loaded league data for {settings.name}")
+    logger.info(f"Successfully loaded league settings for {settings.name}")
     return {
         'league_info': {
             'name': settings.name,
@@ -66,16 +83,20 @@ def load_espn_league_data(league_id, year, espn_s2=None, swid=None):
         'teams': pd.DataFrame(teams_list)
     }
 
-def load_nfl_historical_data(years, include_weekly=True):
+def load_nfl_data(years, include_ngs=True, ngs_min_year=2016, use_threads=True):
     """
-    Load historical NFL stats from nfl_data_py for ALL specified years
+    Load NFL data from nfl_data_py
     
     Parameters:
     -----------
     years : list
         List of years to pull data for
-    include_weekly : bool, optional
-        Whether to include weekly data
+    include_ngs : bool, optional
+        Whether to include Next Gen Stats data
+    ngs_min_year : int, optional
+        Minimum year for NGS data availability
+    use_threads : bool, optional
+        Whether to use threading for faster data loading
         
     Returns:
     --------
@@ -84,11 +105,11 @@ def load_nfl_historical_data(years, include_weekly=True):
     """
     data = {}
     
-    # Load player IDs for mapping first (we'll need this throughout)
+    # Load player IDs for mapping
     logger.info("Loading player ID mapping data")
     try:
         player_ids = nfl.import_ids()
-        # Ensure player_ids has position information
+        # Ensure position column exists
         if 'position' not in player_ids.columns and 'pos' in player_ids.columns:
             player_ids['position'] = player_ids['pos']
         data['player_ids'] = player_ids
@@ -97,8 +118,8 @@ def load_nfl_historical_data(years, include_weekly=True):
         logger.error(f"Error loading player ID data: {e}")
         data['player_ids'] = pd.DataFrame()
     
-    # Load seasonal data for ALL years at once
-    logger.info(f"Loading seasonal data for ALL years: {years}")
+    # Load seasonal data
+    logger.info(f"Loading seasonal data for years: {years}")
     try:
         seasonal_data = nfl.import_seasonal_data(years)
         # Add season type column if missing
@@ -110,19 +131,18 @@ def load_nfl_historical_data(years, include_weekly=True):
         logger.error(f"Error loading seasonal data: {e}")
         data['seasonal'] = pd.DataFrame()
     
-    # Load weekly data if requested for ALL years at once
-    if include_weekly:
-        logger.info(f"Loading weekly data for ALL years: {years}")
-        try:
-            weekly_data = nfl.import_weekly_data(years)
-            data['weekly'] = weekly_data
-            logger.info(f"Loaded weekly data with {len(weekly_data)} rows")
-        except Exception as e:
-            logger.error(f"Error loading weekly data: {e}")
-            data['weekly'] = pd.DataFrame()
+    # Load weekly data
+    logger.info(f"Loading weekly data for years: {years}")
+    try:
+        weekly_data = nfl.import_weekly_data(years)
+        data['weekly'] = weekly_data
+        logger.info(f"Loaded weekly data with {len(weekly_data)} rows")
+    except Exception as e:
+        logger.error(f"Error loading weekly data: {e}")
+        data['weekly'] = pd.DataFrame()
     
-    # Load rosters for ALL years at once
-    logger.info(f"Loading roster data for ALL years: {years}")
+    # Load rosters
+    logger.info(f"Loading roster data for years: {years}")
     try:
         roster_data = nfl.import_seasonal_rosters(years)
         data['rosters'] = roster_data
@@ -131,185 +151,376 @@ def load_nfl_historical_data(years, include_weekly=True):
         logger.error(f"Error loading roster data: {e}")
         data['rosters'] = pd.DataFrame()
     
-    # Load NGS data for ALL historical years
-    for stat_type in ['passing', 'rushing', 'receiving']:
-        logger.info(f"Loading {stat_type} NGS data for ALL years: {years}")
-        try:
-            # Load NGS data for each year to avoid potential issues with bulk loading
-            all_ngs_data = []
-            for year in years:
-                logger.info(f"Loading {stat_type} NGS data for year: {year}")
+    # Load schedules
+    logger.info(f"Loading schedule data for years: {years}")
+    try:
+        schedule_data = nfl.import_schedules(years)
+        data['schedules'] = schedule_data
+        logger.info(f"Loaded schedule data with {len(schedule_data)} rows")
+    except Exception as e:
+        logger.error(f"Error loading schedule data: {e}")
+        data['schedules'] = pd.DataFrame()
+    
+    # Load NGS data if requested
+    if include_ngs:
+        # Filter years for NGS data
+        ngs_years = [year for year in years if year >= ngs_min_year]
+        if not ngs_years:
+            logger.warning(f"No years >= {ngs_min_year} for NGS data")
+        else:
+            logger.info(f"Loading NGS data for years: {ngs_years}")
+            
+            # Function to load NGS data for a specific type and year
+            def load_ngs_data_for_year(stat_type, year):
                 try:
+                    start_time = time.time()
                     year_data = nfl.import_ngs_data(stat_type, [year])
+                    
                     if not year_data.empty:
                         # Add year column if not present
                         if 'season' not in year_data.columns:
                             year_data['season'] = year
-                        all_ngs_data.append(year_data)
+                            
+                        elapsed = time.time() - start_time
+                        logger.info(f"Loaded NGS {stat_type} data for {year} with {len(year_data)} rows in {elapsed:.2f}s")
+                        return year_data
+                    else:
+                        logger.warning(f"Empty NGS {stat_type} data for year {year}")
+                        return None
                 except Exception as e:
                     logger.warning(f"Error loading NGS {stat_type} data for year {year}: {e}")
+                    return None
             
-            # Combine all years' data
-            if all_ngs_data:
-                combined_ngs = pd.concat(all_ngs_data, ignore_index=True)
-                data[f'ngs_{stat_type}'] = combined_ngs
-                logger.info(f"Loaded combined {stat_type} NGS data with {len(combined_ngs)} rows")
-            else:
-                data[f'ngs_{stat_type}'] = pd.DataFrame()
-                logger.warning(f"No valid {stat_type} NGS data loaded for any year")
-        except Exception as e:
-            logger.error(f"Error loading combined NGS {stat_type} data: {e}")
-            data[f'ngs_{stat_type}'] = pd.DataFrame()
+            # Load NGS data for each type
+            for stat_type in ['passing', 'rushing', 'receiving']:
+                logger.info(f"Loading {stat_type} NGS data for years: {ngs_years}")
+                
+                # Use threading to speed up data loading if enabled
+                if use_threads:
+                    all_ngs_data = []
+                    with ThreadPoolExecutor(max_workers=min(10, len(ngs_years))) as executor:
+                        future_to_year = {executor.submit(load_ngs_data_for_year, stat_type, year): year for year in ngs_years}
+                        for future in as_completed(future_to_year):
+                            year = future_to_year[future]
+                            try:
+                                result = future.result()
+                                if result is not None:
+                                    all_ngs_data.append(result)
+                            except Exception as e:
+                                logger.error(f"Exception for NGS {stat_type} data for year {year}: {e}")
+                else:
+                    # Sequential loading
+                    all_ngs_data = []
+                    for year in ngs_years:
+                        result = load_ngs_data_for_year(stat_type, year)
+                        if result is not None:
+                            all_ngs_data.append(result)
+                
+                # Combine all years' data
+                if all_ngs_data:
+                    try:
+                        combined_ngs = pd.concat(all_ngs_data, ignore_index=True)
+                        data[f'ngs_{stat_type}'] = combined_ngs
+                        logger.info(f"Combined {stat_type} NGS data with {len(combined_ngs)} rows")
+                    except Exception as e:
+                        logger.error(f"Error combining NGS {stat_type} data: {e}")
+                        data[f'ngs_{stat_type}'] = pd.DataFrame()
+                else:
+                    data[f'ngs_{stat_type}'] = pd.DataFrame()
+                    logger.warning(f"No valid {stat_type} NGS data loaded for any year")
+    
+    # Load snap counts
+    logger.info(f"Loading snap counts data for years: {years}")
+    try:
+        snap_data = nfl.import_snap_counts(years)
+        data['snap_counts'] = snap_data
+        logger.info(f"Loaded snap counts data with {len(snap_data)} rows")
+    except Exception as e:
+        logger.error(f"Error loading snap counts data: {e}")
+        data['snap_counts'] = pd.DataFrame()
     
     return data
 
-def load_nfl_current_season_data(year):
+def process_player_data(data_dict):
     """
-    Load current season NFL stats from nfl_data_py
+    Process player data for analysis
     
     Parameters:
     -----------
-    year : int
-        Season year
+    data_dict : dict
+        Dictionary containing various data frames
         
     Returns:
     --------
     dict
-        Dictionary containing loaded data
+        Dictionary containing processed data frames
     """
-    data = {}
+    processed_data = {}
     
-    # Load seasonal data if available
-    logger.info(f"Loading seasonal data for year: {year}")
-    try:
-        seasonal_data = nfl.import_seasonal_data([year])
-        # Add season type column if missing
-        if 'season_type' not in seasonal_data.columns:
-            seasonal_data['season_type'] = 'REG'
-        data['seasonal'] = seasonal_data
-        logger.info(f"Loaded seasonal data with {len(seasonal_data)} rows")
-    except Exception as e:
-        logger.error(f"Error loading seasonal data: {e}")
-        data['seasonal'] = pd.DataFrame()
+    # Get player IDs
+    player_ids = data_dict.get('player_ids', pd.DataFrame())
     
-    # Load NGS data for current season
-    for stat_type in ['passing', 'rushing', 'receiving']:
-        logger.info(f"Loading {stat_type} NGS data for year: {year}")
-        try:
-            ngs_data = nfl.import_ngs_data(stat_type, [year])
-            data[f'ngs_{stat_type}'] = ngs_data
-            logger.info(f"Loaded {stat_type} NGS data with {len(ngs_data)} rows")
-        except Exception as e:
-            logger.error(f"Error loading NGS {stat_type} data: {e}")
-            data[f'ngs_{stat_type}'] = pd.DataFrame()
+    # Process seasonal data
+    if 'seasonal' in data_dict and not data_dict['seasonal'].empty:
+        seasonal = data_dict['seasonal'].copy()
+        
+        # Add player info
+        if not player_ids.empty:
+            # Select relevant columns from player_ids
+            id_columns = ['gsis_id', 'name', 'position', 'birthdate', 'college', 'height', 'weight']
+            id_columns = [col for col in id_columns if col in player_ids.columns]
+            
+            # Merge data
+            seasonal = pd.merge(
+                seasonal,
+                player_ids[id_columns],
+                left_on='player_id',
+                right_on='gsis_id',
+                how='left'
+            )
+            
+            # Add age column if birthdate is available
+            if 'birthdate' in seasonal.columns and 'season' in seasonal.columns:
+                try:
+                    # Convert birthdate to datetime if it's not already
+                    if pd.api.types.is_string_dtype(seasonal['birthdate']):
+                        seasonal['birthdate'] = pd.to_datetime(seasonal['birthdate'], errors='coerce')
+                    
+                    # Calculate age at season
+                    seasonal['age'] = seasonal.apply(
+                        lambda row: calculate_age(row['birthdate'], row['season']), 
+                        axis=1
+                    )
+                except Exception as e:
+                    logger.error(f"Error calculating player ages: {e}")
+        
+        # Ensure key columns have consistent naming
+        seasonal = standardize_columns(seasonal)
+        
+        # Calculate derived statistics
+        seasonal = add_derived_features(seasonal)
+        
+        processed_data['seasonal'] = seasonal
+        logger.info(f"Processed seasonal data with {len(seasonal)} rows")
     
-    # Load weekly data if available
-    logger.info(f"Loading weekly data for year: {year}")
-    try:
-        weekly_data = nfl.import_weekly_data([year])
-        data['weekly'] = weekly_data
-        logger.info(f"Loaded weekly data with {len(weekly_data)} rows")
-    except Exception as e:
-        logger.error(f"Error loading weekly data: {e}")
-        data['weekly'] = pd.DataFrame()
+    # Process NGS data
+    for ngs_type in ['ngs_passing', 'ngs_rushing', 'ngs_receiving']:
+        if ngs_type in data_dict and not data_dict[ngs_type].empty:
+            ngs_data = data_dict[ngs_type].copy()
+            
+            # Add player info if available
+            if not player_ids.empty and 'player_gsis_id' in ngs_data.columns:
+                # Select relevant columns from player_ids
+                id_columns = ['gsis_id', 'name', 'position', 'birthdate']
+                id_columns = [col for col in id_columns if col in player_ids.columns]
+                
+                # Merge data
+                ngs_data = pd.merge(
+                    ngs_data,
+                    player_ids[id_columns],
+                    left_on='player_gsis_id',
+                    right_on='gsis_id',
+                    how='left'
+                )
+                
+                # Add age column if birthdate is available
+                if 'birthdate' in ngs_data.columns and 'season' in ngs_data.columns:
+                    try:
+                        # Convert birthdate to datetime if it's not already
+                        if pd.api.types.is_string_dtype(ngs_data['birthdate']):
+                            ngs_data['birthdate'] = pd.to_datetime(ngs_data['birthdate'], errors='coerce')
+                        
+                        # Calculate age at season
+                        ngs_data['age'] = ngs_data.apply(
+                            lambda row: calculate_age(row['birthdate'], row['season']), 
+                            axis=1
+                        )
+                    except Exception as e:
+                        logger.error(f"Error calculating player ages in NGS data: {e}")
+            
+            # Ensure key columns have consistent naming
+            ngs_data = standardize_columns(ngs_data)
+            
+            # Add player_id column for consistency
+            if 'player_id' not in ngs_data.columns and 'player_gsis_id' in ngs_data.columns:
+                ngs_data['player_id'] = ngs_data['player_gsis_id']
+            
+            processed_data[ngs_type] = ngs_data
+            logger.info(f"Processed {ngs_type} data with {len(ngs_data)} rows")
     
-    # Load current rosters
-    logger.info(f"Loading roster data for year: {year}")
-    try:
-        roster_data = nfl.import_seasonal_rosters([year])
-        data['rosters'] = roster_data
-        logger.info(f"Loaded roster data with {len(roster_data)} rows")
-    except Exception as e:
-        logger.error(f"Error loading roster data: {e}")
-        data['rosters'] = pd.DataFrame()
+    # Process weekly data
+    if 'weekly' in data_dict and not data_dict['weekly'].empty:
+        weekly = data_dict['weekly'].copy()
+        
+        # Add player info
+        if not player_ids.empty:
+            # Select relevant columns from player_ids
+            id_columns = ['gsis_id', 'name', 'position', 'birthdate']
+            id_columns = [col for col in id_columns if col in player_ids.columns]
+            
+            # Merge data
+            weekly = pd.merge(
+                weekly,
+                player_ids[id_columns],
+                left_on='player_id',
+                right_on='gsis_id',
+                how='left'
+            )
+            
+            # Add age column if birthdate is available
+            if 'birthdate' in weekly.columns and 'season' in weekly.columns:
+                try:
+                    # Convert birthdate to datetime if it's not already
+                    if pd.api.types.is_string_dtype(weekly['birthdate']):
+                        weekly['birthdate'] = pd.to_datetime(weekly['birthdate'], errors='coerce')
+                    
+                    # Calculate age at season
+                    weekly['age'] = weekly.apply(
+                        lambda row: calculate_age(row['birthdate'], row['season']), 
+                        axis=1
+                    )
+                except Exception as e:
+                    logger.error(f"Error calculating player ages in weekly data: {e}")
+        
+        # Ensure key columns have consistent naming
+        weekly = standardize_columns(weekly)
+        
+        # Add derived weekly features
+        weekly = add_derived_weekly_features(weekly)
+        
+        processed_data['weekly'] = weekly
+        logger.info(f"Processed weekly data with {len(weekly)} rows")
     
-    return data
+    # Add combined player data for easier analysis
+    processed_data = add_combined_player_data(processed_data)
+    
+    return processed_data
 
-def merge_player_data(seasonal_data, player_ids):
+def add_combined_player_data(data_dict):
     """
-    Merge player name and ID information with seasonal data
+    Create combined player data merging seasonal and NGS data
     
     Parameters:
     -----------
-    seasonal_data : DataFrame
-        Seasonal stats data
-    player_ids : DataFrame
-        Player ID mapping data
+    data_dict : dict
+        Dictionary containing processed data frames
         
     Returns:
     --------
-    DataFrame
-        Merged data
+    dict
+        Dictionary with additional combined data
     """
-    if seasonal_data.empty or player_ids.empty:
-        logger.warning("One of the input dataframes is empty")
-        return seasonal_data
+    seasonal = data_dict.get('seasonal', pd.DataFrame())
+    if seasonal.empty:
+        logger.warning("No seasonal data to combine")
+        return data_dict
     
-    # Select relevant columns from player_ids
-    id_columns = ['gsis_id', 'name', 'position', 'birthdate', 'college']
-    id_columns = [col for col in id_columns if col in player_ids.columns]
+    # Make a deep copy of the dictionary
+    result = data_dict.copy()
     
-    if 'position' not in id_columns:
-        logger.warning("No position column found in player_ids. Trying alternative columns.")
-        if 'pos' in player_ids.columns:
-            player_ids['position'] = player_ids['pos']
-            id_columns.append('position')
+    # Combine seasonal data with NGS data by position
+    for position, ngs_type in [('QB', 'ngs_passing'), ('RB', 'ngs_rushing'), ('WR', 'ngs_receiving'), ('TE', 'ngs_receiving')]:
+        if position == 'QB':
+            # QB data = seasonal + NGS passing
+            if 'position' in seasonal.columns and ngs_type in data_dict and not data_dict[ngs_type].empty:
+                seasonal_pos = seasonal[seasonal['position'] == position].copy()
+                ngs_data = data_dict[ngs_type].copy()
+                
+                # Prepare for merge
+                merge_key = 'player_gsis_id' if 'player_gsis_id' in ngs_data.columns else 'player_id'
+                
+                # Group NGS data by player and season to get averages
+                if 'season' in ngs_data.columns:
+                    ngs_grouped = ngs_data.groupby(['player_id', 'season']).mean(numeric_only=True).reset_index()
+                    
+                    # Merge seasonal and NGS data
+                    pos_data = pd.merge(
+                        seasonal_pos,
+                        ngs_grouped,
+                        left_on=['player_id', 'season'],
+                        right_on=['player_id', 'season'],
+                        how='left',
+                        suffixes=('', '_ngs')
+                    )
+                    
+                    # Add position suffix for clarity
+                    result[f'combined_{position.lower()}'] = pos_data
+                    logger.info(f"Created combined {position} data with {len(pos_data)} rows")
+                else:
+                    logger.warning(f"Cannot group NGS data for {position} - missing season column")
+        elif position in ['RB', 'WR', 'TE']:
+            # Rushing/receiving positions with respective NGS data
+            if 'position' in seasonal.columns and ngs_type in data_dict and not data_dict[ngs_type].empty:
+                seasonal_pos = seasonal[seasonal['position'] == position].copy()
+                ngs_data = data_dict[ngs_type].copy()
+                
+                # Group NGS data by player and season to get averages
+                if 'season' in ngs_data.columns:
+                    ngs_grouped = ngs_data.groupby(['player_id', 'season']).mean(numeric_only=True).reset_index()
+                    
+                    # Merge seasonal and NGS data
+                    pos_data = pd.merge(
+                        seasonal_pos,
+                        ngs_grouped,
+                        left_on=['player_id', 'season'],
+                        right_on=['player_id', 'season'],
+                        how='left',
+                        suffixes=('', '_ngs')
+                    )
+                    
+                    # Add position suffix for clarity
+                    result[f'combined_{position.lower()}'] = pos_data
+                    logger.info(f"Created combined {position} data with {len(pos_data)} rows")
+                else:
+                    logger.warning(f"Cannot group NGS data for {position} - missing season column")
     
-    # Merge data
-    merged_data = pd.merge(
-        seasonal_data,
-        player_ids[id_columns],
-        left_on='player_id',
-        right_on='gsis_id',
-        how='left'
-    )
+    # Create filtered data with active players only for predictions
+    last_year = seasonal['season'].max() if not seasonal.empty and 'season' in seasonal.columns else None
     
-    logger.info(f"Merged player data: {len(merged_data)} rows, Position column exists: {'position' in merged_data.columns}")
+    if last_year:
+        active_players = set()
+        
+        # Get active players from last season's data
+        last_season = seasonal[seasonal['season'] == last_year]
+        active_players.update(last_season['player_id'].unique())
+        
+        # Filter seasonal data to active players
+        active_seasonal = seasonal[seasonal['player_id'].isin(active_players)].copy()
+        result['active_players'] = active_seasonal
+        logger.info(f"Created active players dataset with {len(active_seasonal)} players")
     
-    return merged_data
+    return result
 
-def map_ngs_to_player_ids(ngs_data, player_ids):
+def calculate_age(birthdate, season):
     """
-    Map NGS data to player IDs
+    Calculate player age for a given season
     
     Parameters:
     -----------
-    ngs_data : DataFrame
-        NGS stats data
-    player_ids : DataFrame
-        Player ID mapping data
+    birthdate : datetime
+        Player's date of birth
+    season : int
+        NFL season year
         
     Returns:
     --------
-    DataFrame
-        Merged data
+    float
+        Player's age during the season
     """
-    if ngs_data.empty or player_ids.empty:
-        logger.warning("One of the input dataframes is empty")
-        return ngs_data
+    if pd.isnull(birthdate):
+        return np.nan
     
-    # Ensure position is in player_ids
-    if 'position' not in player_ids.columns and 'pos' in player_ids.columns:
-        player_ids['position'] = player_ids['pos']
+    # Use Sept 1 as reference date for NFL season
+    reference_date = datetime(season, 9, 1)
     
-    # NGS data typically uses 'player_gsis_id'
-    if 'player_gsis_id' in ngs_data.columns:
-        merged_data = pd.merge(
-            ngs_data,
-            player_ids[['gsis_id', 'name', 'position']],
-            left_on='player_gsis_id',
-            right_on='gsis_id',
-            how='left'
-        )
-        
-        # Add player_id column for consistency
-        if 'player_id' not in merged_data.columns:
-            merged_data['player_id'] = merged_data['player_gsis_id']
-    else:
-        logger.warning("No player_gsis_id column found in NGS data")
-        merged_data = ngs_data
+    # Calculate age in years
+    age = reference_date.year - birthdate.year
     
-    return merged_data
+    # Adjust if birthday hasn't occurred yet that year
+    if (reference_date.month, reference_date.day) < (birthdate.month, birthdate.day):
+        age -= 1
+    
+    return age
 
 def standardize_columns(df):
     """
@@ -356,7 +567,9 @@ def standardize_columns(df):
         'passing_int': 'interceptions',
         'fumble_lost': 'fumbles_lost',
         'games_played': 'games',
-        'pos': 'position'
+        'pos': 'position',
+        'player_display_name': 'player_name',
+        'player_short_name': 'player_name' 
     }
     
     # Apply column mapping where columns exist
@@ -384,132 +597,342 @@ def standardize_columns(df):
     
     for col in numeric_cols:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            try:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            except Exception as e:
+                logger.error(f"Error converting {col} to numeric: {e}")
     
     return df
 
-def clean_and_merge_all_data(historical_data, current_data):
+def add_derived_features(seasonal_data):
     """
-    Clean and merge all data sources
+    Add derived features to seasonal data
     
     Parameters:
     -----------
-    historical_data : dict
-        Dictionary containing historical data
-    current_data : dict
-        Dictionary containing current season data
+    seasonal_data : DataFrame
+        Seasonal player data
         
     Returns:
     --------
-    dict
-        Dictionary containing cleaned and merged data
+    DataFrame
+        Enhanced seasonal data with derived features
     """
-    result = {}
+    if seasonal_data.empty:
+        return seasonal_data
     
-    # Get player IDs from historical data
-    player_ids = historical_data.get('player_ids', pd.DataFrame())
+    # Create a copy to avoid modifying the original
+    df = seasonal_data.copy()
     
-    # Ensure position column exists in player_ids
-    if 'position' not in player_ids.columns and 'pos' in player_ids.columns:
-        player_ids['position'] = player_ids['pos']
+    # Per game stats
+    if 'games' in df.columns:
+        for col in ['passing_yards', 'rushing_yards', 'receiving_yards', 
+                   'passing_tds', 'rushing_tds', 'receiving_tds',
+                   'targets', 'receptions', 'interceptions', 'carries', 'attempts']:
+            if col in df.columns:
+                df[f'{col}_per_game'] = df[col] / df['games'].clip(lower=1)
     
-    # Process seasonal data - merging historical and current data
-    all_seasonal = []
-    
-    if 'seasonal' in historical_data and not historical_data['seasonal'].empty:
-        hist_seasonal = standardize_columns(historical_data['seasonal'])
-        hist_seasonal = merge_player_data(hist_seasonal, player_ids)
-        if 'position' not in hist_seasonal.columns:
-            logger.warning("Position column missing after merging historical seasonal data")
-        all_seasonal.append(hist_seasonal)
-        result['historical_seasonal'] = hist_seasonal
-    
-    if 'seasonal' in current_data and not current_data['seasonal'].empty:
-        current_seasonal = standardize_columns(current_data['seasonal'])
-        current_seasonal = merge_player_data(current_seasonal, player_ids)
-        if 'position' not in current_seasonal.columns:
-            logger.warning("Position column missing after merging current seasonal data")
-        all_seasonal.append(current_seasonal)
-        result['current_seasonal'] = current_seasonal
-    
-    # Combine all seasonal data
-    if all_seasonal:
-        combined_seasonal = pd.concat(all_seasonal, ignore_index=True)
-        
-        # If position still missing, try to add from player_ids based on player_id
-        if 'position' not in combined_seasonal.columns and 'player_id' in combined_seasonal.columns:
-            logger.info("Attempting to add position from player_ids based on player_id")
-            position_map = dict(zip(player_ids['gsis_id'], player_ids['position']))
-            combined_seasonal['position'] = combined_seasonal['player_id'].map(position_map)
-        
-        result['all_seasonal'] = combined_seasonal
-        
-        # Log column presence for debugging
-        logger.info(f"Final all_seasonal columns: {', '.join(combined_seasonal.columns.tolist())}")
-        logger.info(f"Position column exists: {'position' in combined_seasonal.columns}")
-        logger.info(f"player_id column exists: {'player_id' in combined_seasonal.columns}")
-    
-    # Process NGS data - both historical and current
-    for ngs_type in ['ngs_passing', 'ngs_rushing', 'ngs_receiving']:
-        all_ngs = []
-        
-        if ngs_type in historical_data and not historical_data[ngs_type].empty:
-            hist_ngs = map_ngs_to_player_ids(historical_data[ngs_type], player_ids)
-            all_ngs.append(hist_ngs)
-        
-        if ngs_type in current_data and not current_data[ngs_type].empty:
-            current_ngs = map_ngs_to_player_ids(current_data[ngs_type], player_ids)
-            all_ngs.append(current_ngs)
-        
-        if all_ngs:
-            combined_ngs = pd.concat(all_ngs, ignore_index=True)
-            # Ensure player_id and position columns exist
-            if 'player_id' not in combined_ngs.columns and 'player_gsis_id' in combined_ngs.columns:
-                combined_ngs['player_id'] = combined_ngs['player_gsis_id']
-                
-            if 'position' not in combined_ngs.columns and 'player_position' in combined_ngs.columns:
-                combined_ngs['position'] = combined_ngs['player_position']
-                
-            result[ngs_type] = combined_ngs
-    
-    # Process weekly data
-    all_weekly = []
-    
-    if 'weekly' in historical_data and not historical_data['weekly'].empty:
-        hist_weekly = standardize_columns(historical_data['weekly'])
-        hist_weekly = merge_player_data(hist_weekly, player_ids)
-        all_weekly.append(hist_weekly)
-    
-    if 'weekly' in current_data and not current_data['weekly'].empty:
-        current_weekly = standardize_columns(current_data['weekly'])
-        current_weekly = merge_player_data(current_weekly, player_ids)
-        all_weekly.append(current_weekly)
-    
-    if all_weekly:
-        combined_weekly = pd.concat(all_weekly, ignore_index=True)
-        
-        # If position still missing, try to add from player_ids based on player_id
-        if 'position' not in combined_weekly.columns and 'player_id' in combined_weekly.columns:
-            position_map = dict(zip(player_ids['gsis_id'], player_ids['position']))
-            combined_weekly['position'] = combined_weekly['player_id'].map(position_map)
+    # Add position-specific features
+    if 'position' in df.columns:
+        # QB features
+        qb_mask = df['position'] == 'QB'
+        if qb_mask.any():
+            # Passing efficiency
+            if all(col in df.columns for col in ['completions', 'attempts']):
+                df.loc[qb_mask, 'completion_percentage'] = (df.loc[qb_mask, 'completions'] / 
+                                                          df.loc[qb_mask, 'attempts'].clip(lower=1)) * 100
             
-        result['all_weekly'] = combined_weekly
+            if all(col in df.columns for col in ['passing_yards', 'attempts']):
+                df.loc[qb_mask, 'yards_per_attempt'] = df.loc[qb_mask, 'passing_yards'] / df.loc[qb_mask, 'attempts'].clip(lower=1)
+            
+            if all(col in df.columns for col in ['passing_tds', 'attempts']):
+                df.loc[qb_mask, 'td_percentage'] = (df.loc[qb_mask, 'passing_tds'] / 
+                                                  df.loc[qb_mask, 'attempts'].clip(lower=1)) * 100
+            
+            if all(col in df.columns for col in ['interceptions', 'attempts']):
+                df.loc[qb_mask, 'int_percentage'] = (df.loc[qb_mask, 'interceptions'] / 
+                                                   df.loc[qb_mask, 'attempts'].clip(lower=1)) * 100
+            
+            if all(col in df.columns for col in ['passing_yards', 'attempts', 'passing_tds', 'interceptions']):
+                # Advanced QB metrics
+                df.loc[qb_mask, 'adjusted_yards_per_attempt'] = ((df.loc[qb_mask, 'passing_yards'] + 
+                                                                  (20 * df.loc[qb_mask, 'passing_tds']) - 
+                                                                  (45 * df.loc[qb_mask, 'interceptions'])) / 
+                                                                df.loc[qb_mask, 'attempts'].clip(lower=1))
+            
+            if all(col in df.columns for col in ['passing_tds', 'interceptions']):
+                df.loc[qb_mask, 'td_to_int_ratio'] = df.loc[qb_mask, 'passing_tds'] / df.loc[qb_mask, 'interceptions'].clip(lower=1)
+        
+        # RB features
+        rb_mask = df['position'] == 'RB'
+        if rb_mask.any():
+            if all(col in df.columns for col in ['rushing_yards', 'carries']):
+                df.loc[rb_mask, 'yards_per_carry'] = df.loc[rb_mask, 'rushing_yards'] / df.loc[rb_mask, 'carries'].clip(lower=1)
+            
+            if all(col in df.columns for col in ['rushing_tds', 'carries']):
+                df.loc[rb_mask, 'rushing_td_rate'] = (df.loc[rb_mask, 'rushing_tds'] / 
+                                                    df.loc[rb_mask, 'carries'].clip(lower=1)) * 100
+            
+            if all(col in df.columns for col in ['rushing_yards', 'receiving_yards']):
+                # Create total yards
+                df.loc[rb_mask, 'total_yards'] = df.loc[rb_mask, 'rushing_yards'] + df.loc[rb_mask, 'receiving_yards']
+                
+                # Calculate yards distribution
+                df.loc[rb_mask, 'rushing_yards_percentage'] = (df.loc[rb_mask, 'rushing_yards'] / 
+                                                             df.loc[rb_mask, 'total_yards'].clip(lower=1)) * 100
+                df.loc[rb_mask, 'receiving_yards_percentage'] = (df.loc[rb_mask, 'receiving_yards'] / 
+                                                               df.loc[rb_mask, 'total_yards'].clip(lower=1)) * 100
+            
+            if all(col in df.columns for col in ['rushing_yards', 'receiving_yards', 'carries', 'receptions']):
+                df.loc[rb_mask, 'total_yards_per_touch'] = ((df.loc[rb_mask, 'rushing_yards'] + df.loc[rb_mask, 'receiving_yards']) / 
+                                                          (df.loc[rb_mask, 'carries'] + df.loc[rb_mask, 'receptions']).clip(lower=1))
+            
+            if all(col in df.columns for col in ['receptions', 'targets']):
+                df.loc[rb_mask, 'reception_ratio'] = df.loc[rb_mask, 'receptions'] / df.loc[rb_mask, 'targets'].clip(lower=1)
+        
+        # WR/TE features
+        wr_te_mask = df['position'].isin(['WR', 'TE'])
+        if wr_te_mask.any():
+            if all(col in df.columns for col in ['receiving_yards', 'receptions']):
+                df.loc[wr_te_mask, 'yards_per_reception'] = df.loc[wr_te_mask, 'receiving_yards'] / df.loc[wr_te_mask, 'receptions'].clip(lower=1)
+            
+            if all(col in df.columns for col in ['receiving_yards', 'targets']):
+                df.loc[wr_te_mask, 'yards_per_target'] = df.loc[wr_te_mask, 'receiving_yards'] / df.loc[wr_te_mask, 'targets'].clip(lower=1)
+            
+            if all(col in df.columns for col in ['receiving_tds', 'receptions']):
+                df.loc[wr_te_mask, 'receiving_td_rate'] = (df.loc[wr_te_mask, 'receiving_tds'] / 
+                                                         df.loc[wr_te_mask, 'receptions'].clip(lower=1)) * 100
+            
+            if all(col in df.columns for col in ['receptions', 'targets']):
+                df.loc[wr_te_mask, 'reception_ratio'] = df.loc[wr_te_mask, 'receptions'] / df.loc[wr_te_mask, 'targets'].clip(lower=1)
+            
+            # Advanced receiving metrics
+            if all(col in df.columns for col in ['receiving_air_yards', 'receiving_yards']):
+                df.loc[wr_te_mask, 'air_yards_percentage'] = (df.loc[wr_te_mask, 'receiving_air_yards'] / 
+                                                            df.loc[wr_te_mask, 'receiving_yards'].clip(lower=1)) * 100
+                
+                df.loc[wr_te_mask, 'yac_percentage'] = 100 - df.loc[wr_te_mask, 'air_yards_percentage']
+            
+            # RACR (Receiver Air Conversion Ratio)
+            if all(col in df.columns for col in ['receiving_yards', 'receiving_air_yards']):
+                df.loc[wr_te_mask, 'racr'] = df.loc[wr_te_mask, 'receiving_yards'] / df.loc[wr_te_mask, 'receiving_air_yards'].clip(lower=1)
+            
+            # WOPR (Weighted Opportunity Rating)
+            if all(col in df.columns for col in ['target_share', 'air_yards_share']):
+                df.loc[wr_te_mask, 'wopr'] = (1.5 * df.loc[wr_te_mask, 'target_share']) + (0.7 * df.loc[wr_te_mask, 'air_yards_share'])
     
-    # Process roster data
-    all_rosters = []
+    # Add fantasy points per game
+    if 'fantasy_points' in df.columns and 'games' in df.columns:
+        df['fantasy_points_per_game'] = df['fantasy_points'] / df['games'].clip(lower=1)
     
-    if 'rosters' in historical_data and not historical_data['rosters'].empty:
-        all_rosters.append(historical_data['rosters'])
+    # Calculate career trends (if player played multiple seasons)
+    if 'season' in df.columns and 'player_id' in df.columns:
+        # Ensure data is sorted by player_id and season
+        df = df.sort_values(['player_id', 'season'])
+        
+        # Create shift by 1 season for the same player
+        df_shifted = df.groupby('player_id').shift(1)
+        
+        # Track previous seasons' averages for moving averages
+        df_shifted_2 = df.groupby('player_id').shift(2)
+        df_shifted_3 = df.groupby('player_id').shift(3)
+        
+        # Create trend features for key stats
+        trend_metrics = [
+            'fantasy_points_per_game', 'passing_yards', 'rushing_yards', 'receiving_yards', 
+            'passing_tds', 'rushing_tds', 'receiving_tds', 'fantasy_points'
+        ]
+        
+        # Add additional metrics if they exist
+        potential_metrics = [
+            'targets', 'receptions', 'interceptions', 'attempts', 'completions',
+            'yards_per_attempt', 'yards_per_reception', 'yards_per_target',
+            'yards_per_carry', 'reception_ratio', 'racr'
+        ]
+        
+        # Check which potential metrics exist in the data
+        for metric in potential_metrics:
+            if metric in df.columns:
+                trend_metrics.append(metric)
+        
+        # Process each metric for trend analysis
+        for col in trend_metrics:
+            if col in df.columns:
+                # Previous season value
+                df[f'{col}_prev_season'] = df_shifted[col]
+                
+                # Calculate absolute and percentage change
+                df[f'{col}_change'] = df[col] - df[f'{col}_prev_season']
+                # Avoid division by zero or NaN
+                df[f'{col}_pct_change'] = df[f'{col}_change'] / df[f'{col}_prev_season'].clip(lower=0.1) * 100
+                
+                # Calculate simple moving average (3 seasons) if we have enough data
+                if col in df_shifted_2.columns and col in df_shifted_3.columns:
+                    df[f'{col}_3yr_avg'] = (
+                        df[f'{col}_prev_season'].fillna(0) + 
+                        df_shifted_2[col].fillna(0) + 
+                        df_shifted_3[col].fillna(0)
+                    ) / 3
+                    
+                    # Calculate deviation from 3-year average
+                    df[f'{col}_vs_3yr_avg'] = df[col] - df[f'{col}_3yr_avg']
+                    df[f'{col}_vs_3yr_avg_pct'] = df[f'{col}_vs_3yr_avg'] / df[f'{col}_3yr_avg'].clip(lower=0.1) * 100
+                
+                # Calculate weighted moving average (more weight to recent seasons)
+                if col in df_shifted_2.columns and col in df_shifted_3.columns:
+                    df[f'{col}_weighted_avg'] = (
+                        3 * df[f'{col}_prev_season'].fillna(0) + 
+                        2 * df_shifted_2[col].fillna(0) + 
+                        1 * df_shifted_3[col].fillna(0)
+                    ) / 6
+                    
+                    # Calculate deviation from weighted average
+                    df[f'{col}_vs_weighted_avg'] = df[col] - df[f'{col}_weighted_avg']
+                    df[f'{col}_vs_weighted_avg_pct'] = df[f'{col}_vs_weighted_avg'] / df[f'{col}_weighted_avg'].clip(lower=0.1) * 100
+        
+        # Create consistency metrics
+        for col in ['fantasy_points', 'fantasy_points_per_game']:
+            if col in df.columns and f'{col}_prev_season' in df.columns:
+                # Consistency measure (smaller absolute percentage change is more consistent)
+                df[f'{col}_consistency'] = 100 - abs(df[f'{col}_pct_change']).clip(upper=100)
+        
+        # Calculate season count for each player
+        df['player_season_count'] = df.groupby('player_id')['season'].transform('count')
+        
+        # Calculate seasons in league for each player
+        if 'age' in df.columns:
+            # Calculate age-related trends
+            df['seasons_in_league'] = df['player_season_count'] - 1  # 0-indexed
+            
+            # Create "peak season" indicator based on position
+            if 'position' in df.columns:
+                conditions = [
+                    (df['position'] == 'QB') & (df['age'] >= 28) & (df['age'] <= 32),
+                    (df['position'] == 'RB') & (df['age'] >= 24) & (df['age'] <= 27),
+                    (df['position'] == 'WR') & (df['age'] >= 25) & (df['age'] <= 29),
+                    (df['position'] == 'TE') & (df['age'] >= 26) & (df['age'] <= 30)
+                ]
+                df['peak_season'] = np.select(conditions, [1, 1, 1, 1], default=0)
+                
+                # Create career trajectory indicators
+                df['early_career'] = (df['seasons_in_league'] <= 2).astype(int)
+                df['prime_career'] = ((df['seasons_in_league'] > 2) & (df['seasons_in_league'] <= 6)).astype(int)
+                df['late_career'] = (df['seasons_in_league'] > 6).astype(int)
+        
+        # Handle missing values for new features
+        for col in df.columns:
+            if col.endswith('_prev_season') or col.endswith('_change') or col.endswith('_pct_change') or \
+               col.endswith('_3yr_avg') or col.endswith('_vs_3yr_avg') or col.endswith('_vs_3yr_avg_pct') or \
+               col.endswith('_weighted_avg') or col.endswith('_vs_weighted_avg') or col.endswith('_vs_weighted_avg_pct') or \
+               col.endswith('_consistency'):
+                df[col] = df[col].fillna(0)
     
-    if 'rosters' in current_data and not current_data['rosters'].empty:
-        all_rosters.append(current_data['rosters'])
+    return df
+
+def add_derived_weekly_features(weekly_data):
+    """
+    Add derived features to weekly data for better analysis
     
-    if all_rosters:
-        result['rosters'] = pd.concat(all_rosters, ignore_index=True)
+    Parameters:
+    -----------
+    weekly_data : DataFrame
+        Weekly player data
+        
+    Returns:
+    --------
+    DataFrame
+        Enhanced weekly data
+    """
+    if weekly_data.empty:
+        return weekly_data
     
-    # Make sure to include player_ids in the result
-    result['player_ids'] = player_ids
+    # Create a copy to avoid modifying the original
+    enhanced_data = weekly_data.copy()
     
-    logger.info(f"Data cleaning and merging complete. Result contains {len(result)} datasets.")
+    # Calculate positional benchmarks
+    if 'position' in enhanced_data.columns:
+        # Group by season, week, and position
+        grouped = enhanced_data.groupby(['season', 'week', 'position'])
+        
+        # Calculate positional averages and ranks for key metrics
+        for metric in ['fantasy_points', 'passing_yards', 'rushing_yards', 'receiving_yards']:
+            if metric in enhanced_data.columns:
+                try:
+                    # Calculate position average
+                    enhanced_data[f'{metric}_pos_avg'] = grouped[metric].transform('mean')
+                    
+                    # Calculate standard deviation
+                    enhanced_data[f'{metric}_pos_std'] = grouped[metric].transform('std')
+                    
+                    # Calculate z-score (how many std devs above/below average)
+                    enhanced_data[f'{metric}_z_score'] = (enhanced_data[metric] - enhanced_data[f'{metric}_pos_avg']) / enhanced_data[f'{metric}_pos_std'].replace(0, 1)
+                    
+                    # Calculate percentile rank within position (higher is better)
+                    enhanced_data[f'{metric}_pos_rank'] = grouped[metric].transform(lambda x: x.rank(pct=True, ascending=False))
+                except Exception as e:
+                    logger.error(f"Error calculating positional benchmarks for {metric}: {e}")
     
-    return result
+    # Calculate consistency metrics
+    if 'fantasy_points' in enhanced_data.columns and 'player_id' in enhanced_data.columns and 'season' in enhanced_data.columns:
+        try:
+            # Group by player and season
+            player_season = enhanced_data.groupby(['player_id', 'season'])
+            
+            # Sort data by season and week
+            enhanced_data = enhanced_data.sort_values(['season', 'week'])
+            
+            # Calculate rolling averages and standard deviations
+            enhanced_data['fantasy_points_rolling_avg'] = player_season['fantasy_points'].transform(lambda x: x.shift(1).rolling(window=3, min_periods=1).mean())
+            enhanced_data['fantasy_points_rolling_std'] = player_season['fantasy_points'].transform(lambda x: x.shift(1).rolling(window=3, min_periods=1).std())
+            
+            # Calculate coefficient of variation (lower is more consistent)
+            enhanced_data['fantasy_points_cv'] = enhanced_data['fantasy_points_rolling_std'] / enhanced_data['fantasy_points_rolling_avg'].replace(0, 1)
+            
+            # Calculate consistency score (higher is more consistent)
+            enhanced_data['consistency_score'] = 1 - enhanced_data['fantasy_points_cv'].clip(0, 1)
+        except Exception as e:
+            logger.error(f"Error calculating consistency metrics: {e}")
+    
+    # Calculate matchup difficulty
+    if 'opponent_team' in enhanced_data.columns and 'fantasy_points' in enhanced_data.columns:
+        try:
+            # Group by opponent, season, and week
+            defense_groups = enhanced_data.groupby(['opponent_team', 'season', 'week'])
+            
+            # Calculate average fantasy points allowed by each defense
+            defense_allowed = defense_groups['fantasy_points'].transform('sum')
+            
+            # Group by opponent and position
+            if 'position' in enhanced_data.columns:
+                pos_defense_groups = enhanced_data.groupby(['opponent_team', 'position', 'season', 'week'])
+                
+                # Calculate position-specific fantasy points allowed
+                pos_defense_allowed = pos_defense_groups['fantasy_points'].transform('sum')
+                
+                # Add matchup difficulty score
+                enhanced_data['matchup_difficulty'] = pos_defense_allowed
+        except Exception as e:
+            logger.error(f"Error calculating matchup difficulty: {e}")
+    
+    # Calculate boom/bust indicators (fantasy points exceeding expected)
+    if 'fantasy_points' in enhanced_data.columns and 'fantasy_points_pos_avg' in enhanced_data.columns:
+        try:
+            # Boom: 30% above position average
+            enhanced_data['boom_game'] = (enhanced_data['fantasy_points'] > (enhanced_data['fantasy_points_pos_avg'] * 1.3)).astype(int)
+            
+            # Bust: 30% below position average
+            enhanced_data['bust_game'] = (enhanced_data['fantasy_points'] < (enhanced_data['fantasy_points_pos_avg'] * 0.7)).astype(int)
+            
+            # Calculate boom/bust ratio for each player-season
+            if 'player_id' in enhanced_data.columns and 'season' in enhanced_data.columns:
+                player_season_boom = enhanced_data.groupby(['player_id', 'season'])['boom_game'].transform('sum')
+                player_season_bust = enhanced_data.groupby(['player_id', 'season'])['bust_game'].transform('sum')
+                player_season_games = enhanced_data.groupby(['player_id', 'season'])['boom_game'].transform('count')
+                
+                enhanced_data['boom_rate'] = player_season_boom / player_season_games
+                enhanced_data['bust_rate'] = player_season_bust / player_season_games
+                enhanced_data['boom_bust_ratio'] = player_season_boom / player_season_bust.replace(0, 1)
+        except Exception as e:
+            logger.error(f"Error calculating boom/bust indicators: {e}")
+    
+    return enhanced_data

@@ -56,7 +56,7 @@ class PlayerProjectionModel:
             logger.warning(f"Missing required feature sets: {missing_keys}")
             logger.warning("Make sure you've run clustering and filtering before using this model")
     
-    def create_train_validation_split(self, position, validation_season=None):
+    def create_train_validation_split(self, position, validation_seasons=None):
         """
         Create proper train/validation split using historical seasons
         
@@ -64,9 +64,9 @@ class PlayerProjectionModel:
         -----------
         position : str
             Position to create split for ('qb', 'rb', 'wr', 'te')
-        validation_season : int, optional
-            Season to use as validation (default uses the most recent historical season)
-            
+        validation_seasons : int, list, optional
+            Season(s) to use as validation (can be a single year or list of years)
+                
         Returns:
         --------
         tuple
@@ -117,28 +117,34 @@ class PlayerProjectionModel:
             logger.warning(f"No season information in {position} data, cannot create time-based split")
             return None, None, None, None, None
         
-        # Determine validation season if not provided
-        if validation_season is None:
+        # Convert validation_seasons to list if it's a single integer
+        if validation_seasons is not None:
+            if isinstance(validation_seasons, int):
+                validation_seasons = [validation_seasons]
+        else:
+            # If validation_seasons is None, use the most recent season as default
             seasons = sorted(train_data['season'].unique())
             if len(seasons) < 2:
                 logger.warning(f"Need at least 2 seasons for validation split, only found {len(seasons)}")
                 return None, None, None, None, None
-            validation_season = seasons[-1]  # Use most recent season
-            training_seasons = seasons[:-1]  # Use all other seasons
-        else:
-            training_seasons = [s for s in train_data['season'].unique() if s != validation_season]
+            validation_seasons = [seasons[-1]]
         
-        logger.info(f"Using {validation_season} as validation season and {training_seasons} for training")
+        # Get training seasons (all seasons except validation ones)
+        all_seasons = sorted(train_data['season'].unique())
+        training_seasons = [s for s in all_seasons if s not in validation_seasons]
+        
+        logger.info(f"Using {validation_seasons} as validation season(s) and {training_seasons} for training")
         
         # Create train/validation split
         train_mask = train_data['season'].isin(training_seasons)
-        val_mask = train_data['season'] == validation_season
+        val_mask = train_data['season'].isin(validation_seasons)
         
         # Select features and target
         exclude_cols = [
             'player_id', 'name', 'team', 'season', 'cluster', 'tier', 'pca1', 'pca2', 
-            'gsis_id', 'position', 'projected_points', self.target,
-            'attempts_per_game'  # Exclude derived columns we just created
+            'gsis_id', 'position', 'projected_points', self.target, 'ppr_sh', 'fantasy_points', 'ceiling_factor',
+            'fantasy_points_ppr',
+            # 'attempts_per_game'  # Exclude derived columns we just created
         ]
         
         numeric_cols = train_data.select_dtypes(include=['number']).columns.tolist()
@@ -174,8 +180,8 @@ class PlayerProjectionModel:
             Position to train model for ('qb', 'rb', 'wr', 'te')
         model_type : str
             Type of model ('random_forest' or 'gradient_boosting')
-        validation_season : int, optional
-            Season to use for validation
+        validation_season : int, list, optional
+            Season(s) to use for validation - can be a single year or list of years
         hyperparams : dict, optional
             Model hyperparameters (if not provided, defaults will be used)
         perform_cv : bool
@@ -369,48 +375,48 @@ class PlayerProjectionModel:
                 self.models[position]['overfitting_analysis'] = overfitting_results
         
         return val_metrics
-
-
-    def train_all_positions(self, model_type='random_forest', validation_season=None, 
-                        hyperparams=None, perform_cv=True, evaluate_overfit=True):
-        """
-        Train models for all positions
-        
-        Parameters:
-        -----------
-        model_type : str
-            Type of model ('random_forest' or 'gradient_boosting')
-        validation_season : int, optional
-            Season to use for validation
-        hyperparams : dict, optional
-            Model hyperparameters
-        perform_cv : bool
-            Whether to perform cross-validation
-        evaluate_overfit : bool
-            Whether to run overfitting detection analysis
-            
-        Returns:
-        --------
-        dict
-            Dictionary of validation metrics by position
-        """
-        all_metrics = {}
-        
-        for position in ['qb', 'rb', 'wr', 'te']:
-            metrics = self.train_with_validation(
-                position, 
-                model_type=model_type,
-                validation_season=validation_season,
-                hyperparams=hyperparams,
-                perform_cv=perform_cv,
-                evaluate_overfit=evaluate_overfit
-            )
-            
-            if metrics:
-                all_metrics[position] = metrics
-        
-        return all_metrics
     
+    
+    def train_all_positions(self, model_type='random_forest', validation_season=None, 
+                            hyperparams=None, perform_cv=True, evaluate_overfit=True):
+            """
+            Train models for all positions
+            
+            Parameters:
+            -----------
+            model_type : str
+                Type of model ('random_forest' or 'gradient_boosting')
+            validation_season : int, list, optional
+                Season(s) to use for validation - can be a single year or list of years
+            hyperparams : dict, optional
+                Model hyperparameters
+            perform_cv : bool
+                Whether to perform cross-validation
+            evaluate_overfit : bool
+                Whether to run overfitting detection analysis
+                
+            Returns:
+            --------
+            dict
+                Dictionary of validation metrics by position
+            """
+            all_metrics = {}
+            
+            for position in ['qb', 'rb', 'wr', 'te']:
+                metrics = self.train_with_validation(
+                    position, 
+                    model_type=model_type,
+                    validation_season=validation_season,
+                    hyperparams=hyperparams,
+                    perform_cv=perform_cv,
+                    evaluate_overfit=evaluate_overfit
+                )
+                
+                if metrics:
+                    all_metrics[position] = metrics
+            
+            return all_metrics
+
     def train_position(self, position, model_type='random_forest'):
         """
         Train a model for a specific position (legacy method for compatibility)
@@ -502,7 +508,8 @@ class PlayerProjectionModel:
         importance_path = os.path.join(eval_dir, 'feature_importance.png')
         _, importance_df = analyze_feature_importance(
             model, features, 
-            output_path=importance_path
+            output_path=importance_path,
+            top_n=10
         )
         if importance_df is not None:
             # Save feature importance to CSV
@@ -603,7 +610,7 @@ class PlayerProjectionModel:
         else:
             logger.info("OVERFITTING ASSESSMENT: No strong signals of overfitting detected")
     
-    def project_players(self, position, data):
+    def project_players(self, position, data, use_do_not_draft=True):
         """
         Generate projections for players with improved confidence intervals and ceiling projections
         
@@ -721,7 +728,7 @@ class PlayerProjectionModel:
             prediction_data['ceiling_projection'] = y_pred * ceiling_factors.get(position, 1.5)
         
         # Apply "do not draft" flags to zero out projections
-        if 'do_not_draft' in prediction_data.columns:
+        if use_do_not_draft and 'do_not_draft' in prediction_data.columns:
             do_not_draft_mask = prediction_data['do_not_draft'] == 1
             if do_not_draft_mask.any():
                 count = do_not_draft_mask.sum()
@@ -1100,7 +1107,7 @@ class PlayerProjectionModel:
         
         return instance
     
-    def generate_full_projections(self, projection_data=None):
+    def generate_full_projections(self, projection_data=None, use_do_not_draft=True):
         """
         Generate projections for all positions
         
@@ -1108,6 +1115,8 @@ class PlayerProjectionModel:
         -----------
         projection_data : dict, optional
             Dictionary of projection data by position
+        use_do_not_draft : bool, optional
+            Whether to apply the do_not_draft flag (default: True)
             
         Returns:
         --------
@@ -1126,8 +1135,8 @@ class PlayerProjectionModel:
                 logger.warning(f"No projection data for {position}")
                 continue
             
-            # Generate projections
-            proj_data = self.project_players(position, data)
+            # Generate projections with the flag parameter
+            proj_data = self.project_players(position, data, use_do_not_draft=use_do_not_draft)
             projections[position] = proj_data
             
             # Log projection stats

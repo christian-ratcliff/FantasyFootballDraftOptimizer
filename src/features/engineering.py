@@ -213,7 +213,7 @@ class FantasyFeatureEngineering:
         if 'fantasy_points_per_game' in df.columns:
             # Baseline already exists in the model
             # Add ceiling projection factors
-            df['ceiling_factor'] = 1.0  # Default
+            df['ceiling_factor'] = 1.4  # Default
             
             # Factors that can lead to a higher QB ceiling:
             
@@ -236,6 +236,9 @@ class FantasyFeatureEngineering:
             # 5. Showing improvement
             if 'attempts_yoy_change' in df.columns:
                 df.loc[df['attempts_yoy_change'] > 0.1, 'ceiling_factor'] += 0.15
+                
+            # df['ceiling_projection'] = df['fantasy_points_per_game'] * df['ceiling_factor']
+
         
         if 'season' in df.columns:
             # Sort by player and season to ensure time-based calculations are correct
@@ -443,7 +446,7 @@ class FantasyFeatureEngineering:
         if 'fantasy_points_per_game' in df.columns:
             # Baseline already exists in the model
             # Add ceiling projection factors
-            df['ceiling_factor'] = 1.0  # Default
+            df['ceiling_factor'] = 1.5  # Default
             
             # Factors that can lead to a higher RB ceiling:
             
@@ -470,6 +473,8 @@ class FantasyFeatureEngineering:
             # 6. QB doesn't vulture rushing TDs
             if 'qb_rush_threat' in df.columns:
                 df.loc[df['qb_rush_threat'] == 0, 'ceiling_factor'] += 0.1
+                
+            # df['ceiling_projection'] = df['fantasy_points_per_game'] * df['ceiling_factor']
         
         
         if 'season' in df.columns:
@@ -837,7 +842,7 @@ class FantasyFeatureEngineering:
         if 'fantasy_points_per_game' in df.columns:
             # Baseline already exists in the model
             # Add ceiling projection factors
-            df['ceiling_factor'] = 1.0  # Default
+            df['ceiling_factor'] = 1.7  # Default
             
             # Factors that can lead to a higher ceiling:
             
@@ -862,7 +867,7 @@ class FantasyFeatureEngineering:
                 df.loc[df['targets_yoy_change'] > 0.15, 'ceiling_factor'] += 0.2
             
             # Calculate ceiling projection
-            df['ceiling_projection'] = df['fantasy_points_per_game'] * df['ceiling_factor']
+            # df['ceiling_projection'] = df['fantasy_points_per_game'] * df['ceiling_factor']
         
         # Add additional receiver metrics
         if all(col in df.columns for col in ['targets', 'receptions']):

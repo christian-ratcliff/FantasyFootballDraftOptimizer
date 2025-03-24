@@ -37,26 +37,27 @@ ESPN_S2 = "AECeHAkR7FZuTvVWSEnMRIA29wVeroZhvd7fHHy5tZvIUdIp4XIZaglA17V6g2rulDDFM
 SWID = "{42614A28-F6F5-4052-A14A-28F6F52052AF}"  # Your SWID cookie value 
 
 # Data Analysis Parameters
-START_YEAR = 2019  # First year to include in historical analysis
+START_YEAR = 2010  # First year to include in historical analysis
 INCLUDE_NGS = True  # Whether to include Next Gen Stats (slower but more accurate)
 DEBUG_MODE = False  # Enable for verbose logging
 
 # Processing Options
 CLUSTER_COUNT = 5  # Number of player tiers/clusters to create
 DROP_BOTTOM_TIERS = 1  # Number of bottom tiers to drop
-USE_FILTERED = True #Set use the filtered dataset in the training
+USE_FILTERED = False #Set use the filtered dataset in the training
+USE_DO_NOT_DRAFT = True
 
 
 # Projection Evaluation Parameters
-VALIDATION_YEAR = 2023  # Year to use for validation
+VALIDATION_YEARS = [2021, 2022, 2023]  # Years to use for validation
 PROJECTION_YEAR = 2024  # Year to project
 PERFORM_CV = True  # Whether to perform cross-validation during model training
 
 # Caching and Reuse Options
-USE_CACHED_RAW_DATA = False  # Set to True to use previously downloaded raw data
+USE_CACHED_RAW_DATA = True  # Set to True to use previously downloaded raw data
 USE_CACHED_PROCESSED_DATA = False  # Set to True to use previously processed data
 USE_CACHED_FEATURE_SETS = False  # Set to True to use previously engineered features
-CREATE_VISUALIZATIONS = True  # Whether to generate visualization plots
+CREATE_VISUALIZATIONS = False  # Whether to generate visualization plots
 SKIP_MODEL_TRAINING = False  # Set to True to skip model training/evaluation
 
 
@@ -327,7 +328,9 @@ def evaluate_projections(processed_data, projections, projection_year, output_di
             logger.info(f"Actual players for {position}: {len(pos_actual)}")
             # List the top 5 players in actual data to help with debugging
             if 'fantasy_points_per_game' in pos_actual.columns:
-                top_actual_players = pos_actual.nlargest(5, 'fantasy_points_per_game')['name'].tolist()
+                min_games = 8 
+                qualified_data = pos_actual[pos_actual['games'] >= min_games]
+                top_actual_players = qualified_data.nlargest(5, 'fantasy_points_per_game')['name'].tolist()
                 logger.info(f"Top 5 actual {position} players: {top_actual_players}")
         
         if 'name' not in pos_projections.columns or 'name' not in pos_actual.columns:
@@ -827,7 +830,7 @@ def main():
         # Train models for all positions with proper validation
         all_metrics = projection_model.train_all_positions(
             model_type='random_forest',
-            validation_season=VALIDATION_YEAR,
+            validation_season=VALIDATION_YEARS,
             perform_cv=PERFORM_CV,
             evaluate_overfit=True 
         )
@@ -847,7 +850,7 @@ def main():
         
         # Generate projections
         logger.info(f"Generating projections for {PROJECTION_YEAR}...")
-        projections = projection_model.generate_full_projections(projection_filters)
+        projections = projection_model.generate_full_projections(projection_filters, use_do_not_draft=USE_DO_NOT_DRAFT)
         
         # Make sure we have processed data for evaluation
         if use_cached_features and (not processed_data or 'seasonal' not in processed_data or processed_data['seasonal'].empty):

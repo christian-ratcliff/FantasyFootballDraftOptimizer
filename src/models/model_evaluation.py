@@ -81,7 +81,7 @@ def plot_learning_curves(model, X, y, cv=5, output_path=None):
         'final_gap': gap
     }
 
-def analyze_feature_importance(model, feature_names, output_path=None):
+def analyze_feature_importance(model, feature_names, output_path=None, top_n=10):
     """Analyze feature importances to identify potential overfitting signals"""
     if not hasattr(model, 'feature_importances_'):
         logger.warning("Model doesn't have feature_importances_ attribute")
@@ -91,16 +91,52 @@ def analyze_feature_importance(model, feature_names, output_path=None):
     importances = model.feature_importances_
     indices = np.argsort(importances)[::-1]
     
-    # Plot feature importances
-    plt.figure(figsize=(12, 8))
-    plt.title('Feature Importances')
-    plt.bar(range(len(indices)), importances[indices], align='center')
-    plt.xticks(range(len(indices)), [feature_names[i] for i in indices], rotation=90)
-    plt.tight_layout()
+    # Determine how many features to show (top_n or all if fewer)
+    n_features = min(top_n, len(feature_names))
     
-    # Log top and bottom features
-    logger.info("Top 10 features:")
-    for i in range(min(10, len(feature_names))):
+    # Plot only the top N features
+    plt.figure(figsize=(10, 8))
+    
+    # Use top_n indices and features
+    top_indices = indices[:n_features]
+    top_importances = importances[top_indices]
+    top_features = [feature_names[i] for i in top_indices]
+    
+    # Create bars with a color gradient
+    cmap = plt.cm.get_cmap('viridis')
+    colors = [cmap(i/n_features) for i in range(n_features)]
+    
+    # Plot in reverse order (most important at top)
+    y_pos = np.arange(n_features)
+    bars = plt.barh(y_pos, top_importances[::-1], align='center', color=colors[::-1])
+    
+    # Add feature names and values
+    plt.yticks(y_pos, top_features[::-1])
+    
+    # Add importance values next to the bars
+    for i, bar in enumerate(bars):
+        plt.text(bar.get_width() + 0.005, bar.get_y() + bar.get_height()/2, 
+                f"{top_importances[::-1][i]:.3f}", 
+                va='center', fontsize=9)
+    
+    plt.xlabel('Importance')
+    plt.title(f'Top {n_features} Feature Importances')
+    
+    # Calculate what percentage of total importance the top features represent
+    total_importance = sum(importances)
+    top_importance_sum = sum(top_importances)
+    importance_percentage = (top_importance_sum / total_importance) * 100
+    
+    # Add text showing the percentage of total importance
+    plt.figtext(0.5, 0.01, 
+                f"These top {n_features} features represent {importance_percentage:.1f}% of total importance",
+                ha='center', fontsize=10)
+    
+    plt.tight_layout(rect=[0, 0.03, 1, 0.97])  # Adjust layout to make room for the note
+    
+    # Log top features
+    logger.info(f"Top {n_features} features:")
+    for i in range(n_features):
         logger.info(f"{feature_names[indices[i]]}: {importances[indices[i]]:.4f}")
     
     # Check for distribution of importance
@@ -115,7 +151,7 @@ def analyze_feature_importance(model, feature_names, output_path=None):
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         logger.info(f"Feature importance plot saved to {output_path}")
     
-    # Create a DataFrame with importance results
+    # Create a DataFrame with importance results for all features
     importance_df = pd.DataFrame({
         'feature': [feature_names[i] for i in indices],
         'importance': importances[indices]
@@ -220,74 +256,141 @@ def temporal_validation(model, data, years, feature_cols, target='fantasy_points
 
 def cross_validation_analysis(model, X, y, cv=5, output_path=None):
     """Analyze cross-validation scores to detect overfitting"""
-    # Run cross-validation
-    cv_results = cross_validate(
-        model, X, y, 
-        cv=cv, 
-        scoring=['neg_mean_squared_error', 'r2'],
-        return_train_score=True
-    )
-    
-    # Extract and convert scores
-    train_rmse = np.sqrt(-cv_results['train_neg_mean_squared_error'])
-    test_rmse = np.sqrt(-cv_results['test_neg_mean_squared_error'])
-    train_r2 = cv_results['train_r2']
-    test_r2 = cv_results['test_r2']
-    
-    # Calculate statistics
-    train_rmse_mean, train_rmse_std = train_rmse.mean(), train_rmse.std()
-    test_rmse_mean, test_rmse_std = test_rmse.mean(), test_rmse.std()
-    train_r2_mean, train_r2_std = train_r2.mean(), train_r2.std()
-    test_r2_mean, test_r2_std = test_r2.mean(), test_r2.std()
-    
-    logger.info(f"Train RMSE: {train_rmse_mean:.2f} ± {train_rmse_std:.2f}")
-    logger.info(f"Test RMSE: {test_rmse_mean:.2f} ± {test_rmse_std:.2f}")
-    logger.info(f"Train R²: {train_r2_mean:.2f} ± {train_r2_std:.2f}")
-    logger.info(f"Test R²: {test_r2_mean:.2f} ± {test_r2_std:.2f}")
-    
-    # High variance in test scores can indicate overfitting
-    if test_rmse_std / test_rmse_mean > 0.2:
-        logger.warning("High variance in test scores may indicate overfitting")
-    
-    # Create boxplot
-    plt.figure(figsize=(10, 6))
-    data = [train_rmse, test_rmse]
-    plt.boxplot(data, labels=['Train RMSE', 'Test RMSE'])
-    plt.title('Cross-Validation Score Distribution')
-    plt.grid(True, alpha=0.3)
-    
-    # Add a second plot for R²
-    plt.figure(figsize=(10, 6))
-    data_r2 = [train_r2, test_r2]
-    plt.boxplot(data_r2, labels=['Train R²', 'Test R²'])
-    plt.title('Cross-Validation R² Distribution')
-    plt.grid(True, alpha=0.3)
-    
-    # Save the plots if a path is provided
-    if output_path:
-        # Save RMSE plot
-        rmse_path = output_path.replace('.png', '_rmse.png')
-        plt.figure(1)
-        plt.savefig(rmse_path, dpi=300, bbox_inches='tight')
-        logger.info(f"CV RMSE plot saved to {rmse_path}")
+    try:
+        # Run cross-validation
+        cv_results = cross_validate(
+            model, X, y, 
+            cv=cv, 
+            scoring=['neg_mean_squared_error', 'r2'],
+            return_train_score=True
+        )
         
-        # Save R² plot
-        r2_path = output_path.replace('.png', '_r2.png')
-        plt.figure(2)
-        plt.savefig(r2_path, dpi=300, bbox_inches='tight')
-        logger.info(f"CV R² plot saved to {r2_path}")
-    
-    return plt, {
-        'train_rmse_mean': train_rmse_mean,
-        'train_rmse_std': train_rmse_std,
-        'test_rmse_mean': test_rmse_mean,
-        'test_rmse_std': test_rmse_std,
-        'train_r2_mean': train_r2_mean,
-        'train_r2_std': train_r2_std,
-        'test_r2_mean': test_r2_mean,
-        'test_r2_std': test_r2_std,
-        'train_rmse': train_rmse.tolist(),
-        'test_rmse': test_rmse.tolist(),
-        'train_r2': train_r2.tolist(),
-        'test_r2': test_r2.tolist()
-    }
+        # Extract and convert scores
+        train_rmse = np.sqrt(-cv_results['train_neg_mean_squared_error'])
+        test_rmse = np.sqrt(-cv_results['test_neg_mean_squared_error'])
+        train_r2 = cv_results['train_r2']
+        test_r2 = cv_results['test_r2']
+        
+        # Calculate statistics
+        train_rmse_mean, train_rmse_std = train_rmse.mean(), train_rmse.std()
+        test_rmse_mean, test_rmse_std = test_rmse.mean(), test_rmse.std()
+        train_r2_mean, train_r2_std = train_r2.mean(), train_r2.std()
+        test_r2_mean, test_r2_std = test_r2.mean(), test_r2.std()
+        
+        logger.info(f"Train RMSE: {train_rmse_mean:.2f} ± {train_rmse_std:.2f}")
+        logger.info(f"Test RMSE: {test_rmse_mean:.2f} ± {test_rmse_std:.2f}")
+        logger.info(f"Train R²: {train_r2_mean:.2f} ± {train_r2_std:.2f}")
+        logger.info(f"Test R²: {test_r2_mean:.2f} ± {test_r2_std:.2f}")
+        
+        # High variance in test scores can indicate overfitting
+        if test_rmse_std / test_rmse_mean > 0.2:
+            logger.warning("High variance in test scores may indicate overfitting")
+        
+        # Create RMSE boxplot - keep track of the figure
+        fig_rmse = plt.figure(figsize=(10, 6))
+        ax_rmse = fig_rmse.add_subplot(111)
+        
+        # Add jitter to data points for better visualization
+        data = [train_rmse, test_rmse]
+        bp_rmse = ax_rmse.boxplot(data, labels=['Train RMSE', 'Test RMSE'], 
+                           patch_artist=True, showfliers=True, 
+                           boxprops=dict(facecolor='lightblue'))
+        
+        # Add individual points with jitter
+        for i, d in enumerate(data):
+            # Create jitter
+            spread = 0.15
+            x = np.random.normal(i+1, spread, size=len(d))
+            ax_rmse.scatter(x, d, alpha=0.6, s=20, color='navy')
+            
+        ax_rmse.set_title('Cross-Validation RMSE Distribution')
+        ax_rmse.grid(True, alpha=0.3)
+        
+        # Add mean values as text
+        ax_rmse.text(0.95, 0.95, f"Train: {train_rmse_mean:.2f} ± {train_rmse_std:.2f}\nTest: {test_rmse_mean:.2f} ± {test_rmse_std:.2f}",
+                 transform=ax_rmse.transAxes, va='top', ha='right',
+                 bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
+        
+        # Ensure y-axis has reasonable limits
+        y_min = min(min(train_rmse), min(test_rmse)) * 0.9
+        y_max = max(max(train_rmse), max(test_rmse)) * 1.1
+        ax_rmse.set_ylim(y_min, y_max)
+        
+        # Create R² boxplot as a separate figure
+        fig_r2 = plt.figure(figsize=(10, 6))
+        ax_r2 = fig_r2.add_subplot(111)
+        
+        # Create boxplot with better styling
+        data_r2 = [train_r2, test_r2]
+        bp_r2 = ax_r2.boxplot(data_r2, labels=['Train R²', 'Test R²'],
+                        patch_artist=True, showfliers=True,
+                        boxprops=dict(facecolor='lightgreen'))
+        
+        # Add individual points with jitter
+        for i, d in enumerate(data_r2):
+            # Create jitter
+            spread = 0.15
+            x = np.random.normal(i+1, spread, size=len(d))
+            ax_r2.scatter(x, d, alpha=0.6, s=20, color='darkgreen')
+            
+        ax_r2.set_title('Cross-Validation R² Distribution')
+        ax_r2.grid(True, alpha=0.3)
+        
+        # Add mean values as text
+        ax_r2.text(0.95, 0.05, f"Train: {train_r2_mean:.2f} ± {train_r2_std:.2f}\nTest: {test_r2_mean:.2f} ± {test_r2_std:.2f}",
+                transform=ax_r2.transAxes, va='bottom', ha='right',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
+        
+        # Ensure y-axis has reasonable limits
+        r2_min = min(min(train_r2), min(test_r2)) * 0.9
+        r2_max = max(max(train_r2), max(test_r2)) * 1.1
+        ax_r2.set_ylim(r2_min, r2_max)
+        
+        # Save the plots if a path is provided
+        if output_path:
+            try:
+                # Save RMSE plot
+                rmse_path = output_path.replace('.png', '_rmse.png')
+                fig_rmse.savefig(rmse_path, dpi=300, bbox_inches='tight')
+                logger.info(f"CV RMSE plot saved to {rmse_path}")
+                
+                # Save R² plot
+                r2_path = output_path.replace('.png', '_r2.png')
+                fig_r2.savefig(r2_path, dpi=300, bbox_inches='tight')
+                logger.info(f"CV R² plot saved to {r2_path}")
+            except Exception as e:
+                logger.error(f"Error saving CV plots: {e}")
+        
+        return fig_r2, {
+            'train_rmse_mean': train_rmse_mean,
+            'train_rmse_std': train_rmse_std,
+            'test_rmse_mean': test_rmse_mean,
+            'test_rmse_std': test_rmse_std,
+            'train_r2_mean': train_r2_mean,
+            'train_r2_std': train_r2_std,
+            'test_r2_mean': test_r2_mean,
+            'test_r2_std': test_r2_std,
+            'train_rmse': train_rmse.tolist(),
+            'test_rmse': test_rmse.tolist(),
+            'train_r2': train_r2.tolist(),
+            'test_r2': test_r2.tolist()
+        }
+    except Exception as e:
+        logger.error(f"Error in cross_validation_analysis: {e}")
+        # Create a basic error plot
+        fig = plt.figure(figsize=(8, 6))
+        ax = fig.add_subplot(111)
+        ax.text(0.5, 0.5, f"Error creating CV plot:\n{str(e)}", 
+                ha='center', va='center', transform=ax.transAxes,
+                bbox=dict(boxstyle='round', facecolor='lightcoral'))
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_title("Cross-Validation Error")
+        
+        if output_path:
+            try:
+                fig.savefig(output_path, dpi=300, bbox_inches='tight')
+            except:
+                pass
+        
+        return fig, {}

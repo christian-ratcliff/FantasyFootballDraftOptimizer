@@ -36,53 +36,68 @@ def load_espn_league_data(league_id, year, espn_s2=None, swid=None):
     # Initialize connection to ESPN league
     try:
         league = League(league_id=league_id, year=year, espn_s2=espn_s2, swid=swid)
-    except Exception as e:
-        logger.error(f"Error connecting to ESPN league: {e}")
-        logger.info("Creating default league settings")
+        
+        # Extract relevant league settings
+        settings = league.settings
+        
+        # Extract scoring settings
+        scoring_dict = {}
+        for item in settings.scoring_format:
+            scoring_dict[item['abbr']] = item['points']
+        
+        # Extract roster settings
+        roster_dict = settings.position_slot_counts
+        
+        # Get league teams
+        teams_list = []
+        for team in league.teams:
+            teams_list.append({
+                'team_id': team.team_id,
+                'team_name': team.team_name,
+                'owner': team.owners[0] if team.owners else None,
+                'division': team.division_name
+            })
+        
+        logger.info(f"Successfully loaded league settings for {settings.name}")
         return {
             'league_info': {
-                'name': 'Default League',
-                'team_count': 10,
-                'playoff_teams': 6
+                'name': settings.name,
+                'team_count': settings.team_count,
+                'playoff_teams': settings.playoff_team_count
             },
-            'scoring_settings': {},
-            'roster_settings': {},
-            'teams': pd.DataFrame()
+            'scoring_settings': scoring_dict,
+            'roster_settings': roster_dict,
+            'teams': pd.DataFrame(teams_list)
         }
-    
-    # Extract relevant league settings
-    settings = league.settings
-    
-    # Extract scoring settings
-    scoring_dict = {}
-    for item in settings.scoring_format:
-        scoring_dict[item['abbr']] = item['points']
-    
-    # Extract roster settings
-    roster_dict = settings.position_slot_counts
-    
-    # Get league teams
-    teams_list = []
-    for team in league.teams:
-        teams_list.append({
-            'team_id': team.team_id,
-            'team_name': team.team_name,
-            'owner': team.owners[0] if team.owners else None,
-            'division': team.division_name
-        })
-    
-    logger.info(f"Successfully loaded league settings for {settings.name}")
-    return {
-        'league_info': {
-            'name': settings.name,
-            'team_count': settings.team_count,
-            'playoff_teams': settings.playoff_team_count
-        },
-        'scoring_settings': scoring_dict,
-        'roster_settings': roster_dict,
-        'teams': pd.DataFrame(teams_list)
-    }
-
+        
+    except Exception as e:
+        logger.error(f"Error connecting to ESPN league: {e}")
+        logger.info("Loading league settings from backup configuration file")
+        try:
+            # Try to load from config file
+            import json
+            with open('configs/league_settings.json', 'r') as f:
+                config = json.load(f)
+            logger.info(f"Successfully loaded settings from config file")
+            
+            # Make sure teams is a DataFrame if it exists in the config
+            if 'teams' not in config or not isinstance(config['teams'], pd.DataFrame):
+                config['teams'] = pd.DataFrame()
+                
+            return config
+        except Exception as e2:
+            logger.error(f"Error loading backup configuration: {e2}")
+            # Fall back to hardcoded defaults
+            return {
+                'league_info': {
+                    'name': 'Default League',
+                    'team_count': 10,
+                    'playoff_teams': 6
+                },
+                'scoring_settings': {},
+                'roster_settings': {},
+                'teams': pd.DataFrame()
+            }
 def load_nfl_data(years, include_ngs=True, ngs_min_year=2016, use_threads=True):
     """
     Load NFL data from nfl_data_py

@@ -9,9 +9,11 @@ This script orchestrates the complete data analysis pipeline:
 4. Performs clustering and tier-based analysis
 5. Creates comprehensive visualizations
 6. Evaluates projection model performance using proper validation
+7. Trains PPO reinforcement learning model for optimal draft strategy
 """
 
 import os
+import pickle
 import shutil
 import time
 import random
@@ -49,22 +51,19 @@ DEBUG_MODE = False  # Enable for verbose logging
 # Processing Options
 CLUSTER_COUNT = 5  # Number of player tiers/clusters to create
 DROP_BOTTOM_TIERS = 1  # Number of bottom tiers to drop
-USE_FILTERED = True #Set use the filtered dataset in the training
+USE_FILTERED = False  # Set use the filtered dataset in the training
 USE_DO_NOT_DRAFT = True
 
-
 # Projection Evaluation Parameters
-# VALIDATION_YEARS = [2021, 2022, 2023]  # Years to use for validation
 PROJECTION_YEAR = 2024  # Year to project
 PERFORM_CV = True  # Whether to perform cross-validation during model training
 
 # Caching and Reuse Options
-USE_CACHED_RAW_DATA =True  # Set to True to use previously downloaded raw data
-USE_CACHED_PROCESSED_DATA =True  # Set to True to use previously processed data
-USE_CACHED_FEATURE_SETS = True # Set to True to use previously engineered features
+USE_CACHED_RAW_DATA = True  # Set to True to use previously downloaded raw data
+USE_CACHED_PROCESSED_DATA = True  # Set to True to use previously processed data
+USE_CACHED_FEATURE_SETS = True  # Set to True to use previously engineered features
 CREATE_VISUALIZATIONS = False  # Whether to generate visualization plots
 SKIP_MODEL_TRAINING = False  # Set to True to skip model training/evaluation
-
 
 # File Paths
 CONFIG_PATH = 'configs/league_settings.json'  # Path to optional config file
@@ -72,30 +71,36 @@ DATA_DIR = 'data'  # Base directory for all data
 OUTPUT_DIR = os.path.join(DATA_DIR, 'outputs')  # Directory for visualizations
 MODELS_DIR = os.path.join(DATA_DIR, 'models')  # Directory for saved models
 
-
 # Draft Simulator Settings
-RUN_DRAFT_SIMULATIONS = True  # Whether to run draft simulations
-NUM_DRAFT_SIMULATIONS = 200    # Number of draft simulations to run
-DRAFT_STRATEGIES_TO_TEST = ["VBD", "ESPN", "ZeroRB", "HeroRB", "TwoRB", "BestAvailable", "RL"]
-USER_DRAFT_POSITION = None    # Set to a position (1-10) to simulate drafting as that position
+RUN_DRAFT_SIMULATIONS = False  # Whether to run draft simulations
+NUM_DRAFT_SIMULATIONS = 200  # Number of draft simulations to run
+DRAFT_STRATEGIES_TO_TEST = ["VBD", "ESPN", "ZeroRB", "HeroRB", "TwoRB", "BestAvailable", "PPO"]
+USER_DRAFT_POSITION = None  # Set to a position (1-10) to simulate drafting as that position
 
 # Season Simulator Settings
-RUN_SEASON_SIMULATIONS = True  # Whether to run season simulations
-NUM_SEASON_SIMULATIONS = 150   # Number of seasons to simulate per draft
-RANDOMNESS_FACTOR = 0.2        # Amount of randomness in weekly scoring (0.0 = deterministic, higher = more random)
-NUM_REGULAR_WEEKS = 14         # Number of regular season weeks
-NUM_PLAYOFF_TEAMS = 6          # Number of playoff teams
-NUM_PLAYOFF_WEEKS = 3          # Number of playoff weeks
+RUN_SEASON_SIMULATIONS = False  # Whether to run season simulations
+NUM_SEASON_SIMULATIONS = 150  # Number of seasons to simulate per draft
+RANDOMNESS_FACTOR = 0.2  # Amount of randomness in weekly scoring (0.0 = deterministic, higher = more random)
+NUM_REGULAR_WEEKS = 14  # Number of regular season weeks
+NUM_PLAYOFF_TEAMS = 6  # Number of playoff teams
+NUM_PLAYOFF_WEEKS = 3  # Number of playoff weeks
 
-# Reinforcement Learning Settings
-TRAIN_RL_MODEL = True       # Whether to train the RL model
-NUM_RL_EPISODES = 200          # Number of episodes to train for
-RL_EVAL_INTERVAL = 10          # Number of episodes between evaluations
-USE_EXISTING_RL_MODEL = False  # Whether to use a pre-trained RL model
-RL_MODEL_PATH = 'data/models/rl_drafter_final'  # Path to pre-trained RL model
+# PPO Reinforcement Learning Settings
+TRAIN_PPO_MODEL = True  # Whether to train the PPO model
+NUM_PPO_EPISODES = 2000  # Number of episodes to train PPO for
+PPO_EVAL_INTERVAL = 10  # Number of episodes between PPO evaluations
+PPO_SAVE_INTERVAL = 50  # Number of episodes between PPO model saves
+USE_EXISTING_PPO_MODEL = False  # Whether to use a pre-trained PPO model
+PPO_MODEL_PATH = 'data/models/ppo_models/ppo_drafter_final'  # Path to pre-trained PPO model
+PPO_LEARNING_RATE = 0.0003  # Learning rate for PPO
+PPO_GAMMA = 0.96  # Discount factor for PPO
+PPO_BATCH_SIZE = 32  # Batch size for PPO training
+PPO_POLICY_CLIP = 0.1  # Policy clipping parameter for PPO
+PPO_ENTROPY_COEF = 0.02  # Entropy coefficient for PPO
+USE_TOP_N_FEATURES = 7
 
 # Draft Analysis Output
-SAVE_DRAFT_RESULTS = True      # Whether to save draft results
+SAVE_DRAFT_RESULTS = True  # Whether to save draft results
 DRAFT_RESULTS_PATH = 'data/outputs/draft_results'  # Path to save draft results
 
 #######################################################
@@ -125,11 +130,13 @@ from src.data.loader import (
 )
 from src.features.engineering import FantasyFeatureEngineering
 from src.analysis.visualizer import FantasyDataVisualizer
-from src.analysis.ml_explorer import MLExplorer
+from src.analysis.analyzer import FantasyFootballAnalyzer
 from src.models.projections import PlayerProjectionModel
-from src.models.rl_drafter import RLDrafter
+from src.models.ppo_drafter import PPODrafter, DraftState
 from src.models.draft_simulator import DraftSimulator, Player
 from src.models.season_simulator import SeasonSimulator, SeasonEvaluator
+from src.models.projections import ProjectionModelLoader
+from src.models.lineup_evaluator import LineupEvaluator
 
 def load_config(config_path):
     """Load configuration from file"""
@@ -181,6 +188,10 @@ def create_output_dirs():
             for analysis_type in analysis_types:
                 path = os.path.join(OUTPUT_DIR, position, analysis_type)
                 os.makedirs(path, exist_ok=True)
+    
+    # Create PPO models directory
+    ppo_models_dir = os.path.join(MODELS_DIR, 'ppo_models')
+    os.makedirs(ppo_models_dir, exist_ok=True)
     
     return dirs
 
@@ -274,7 +285,7 @@ def load_cached_feature_sets(processed_data_dir):
     Returns:
     --------
     dict
-        Dictionary containing feature sets
+        Dictionary with additional combined data
     """
     logger.info("Loading feature sets from cache...")
     feature_sets = {}
@@ -651,15 +662,36 @@ def evaluate_projections(processed_data, projections, projection_year, output_di
     
     return results
 
-def run_draft_simulations(projections, league_info, roster_limits, scoring_settings, results_dir):
-
-
+def run_draft_simulations(projections, league_info, roster_limits, scoring_settings, ppo_model=None, results_dir=None):
+    """
+    Run draft simulations
     
+    Parameters:
+    -----------
+    projections : dict
+        Dictionary of player projections by position
+    league_info : dict
+        Dictionary containing league information
+    roster_limits : dict
+        Dictionary of roster position limits
+    scoring_settings : dict
+        Dictionary of scoring settings
+    ppo_model : PPODrafter
+        PPO model to use for RL strategy (if None, use baseline strategies)
+    results_dir : str
+        Directory to save results
+        
+    Returns:
+    --------
+    dict
+        Dictionary of simulation results
+    """
     
     logger.info("Running draft simulations...")
     
     # Ensure results directory exists
-    os.makedirs(results_dir, exist_ok=True)
+    if results_dir:
+        os.makedirs(results_dir, exist_ok=True)
     
     # Extract league size
     league_size = league_info.get('league_info', {}).get('team_count', 10)
@@ -737,8 +769,19 @@ def run_draft_simulations(projections, league_info, roster_limits, scoring_setti
             user_pick=USER_DRAFT_POSITION
         )
         
+        # Inject PPO model if available
+        if ppo_model is not None:
+            # Replace "RL" strategy with "PPO" strategy
+            for team in draft_sim.teams:
+                if team.strategy == "RL":
+                    team.strategy = "PPO"
+            
+            # Rename strategy in metrics tracking
+            if "RL" in strategy_metrics and "PPO" not in strategy_metrics:
+                strategy_metrics["PPO"] = strategy_metrics.pop("RL")
+        
         # Run draft
-        teams, draft_history = draft_sim.run_draft()
+        teams, draft_history = draft_sim.run_draft(ppo_model=ppo_model)
         
         # Reset random seed for next simulation
         random.seed(time.time() + sim)
@@ -748,8 +791,9 @@ def run_draft_simulations(projections, league_info, roster_limits, scoring_setti
         all_draft_histories.append(draft_history)
         
         # Generate draft report
-        report_path = os.path.join(results_dir, f"draft_simulation_{sim+1}.csv")
-        draft_sim.create_draft_report(output_path=report_path)
+        if results_dir:
+            report_path = os.path.join(results_dir, f"draft_simulation_{sim+1}.csv")
+            draft_sim.create_draft_report(output_path=report_path)
         
         # Calculate metrics by strategy
         for team in teams:
@@ -791,36 +835,37 @@ def run_draft_simulations(projections, league_info, roster_limits, scoring_setti
     ])
     
     # Save summary
-    summary_path = os.path.join(results_dir, "draft_summary.csv")
-    summary_df.to_csv(summary_path, index=False)
-    
-    # Create visualization
-    plt.figure(figsize=(12, 8))
-    
-    # Plot average starter points by strategy
-    ax = sns.barplot(
-        x="Strategy", 
-        y="Avg Starter Points", 
-        data=summary_df, 
-        palette="viridis"
-    )
-    
-    # Add data labels
-    for i, row in enumerate(summary_df.itertuples()):
-        ax.text(
-            i, 
-            row._3 + 5,  # Add a small offset
-            f"{row._3:.1f}",
-            ha='center'
+    if results_dir:
+        summary_path = os.path.join(results_dir, "draft_summary.csv")
+        summary_df.to_csv(summary_path, index=False)
+        
+        # Create visualization
+        plt.figure(figsize=(12, 8))
+        
+        # Plot average starter points by strategy
+        ax = sns.barplot(
+            x="Strategy", 
+            y="Avg Starter Points", 
+            data=summary_df, 
+            palette="viridis"
         )
-    
-    plt.title("Average Starter Points by Draft Strategy")
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
-    
-    # Save figure
-    plt.tight_layout()
-    plt.savefig(os.path.join(results_dir, "draft_strategy_comparison.png"), dpi=300)
-    plt.close()
+        
+        # Add data labels
+        for i, row in enumerate(summary_df.itertuples()):
+            ax.text(
+                i, 
+                row._3 + 5,  # Add a small offset
+                f"{row._3:.1f}",
+                ha='center'
+            )
+        
+        plt.title("Average Starter Points by Draft Strategy")
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        
+        # Save figure
+        plt.tight_layout()
+        plt.savefig(os.path.join(results_dir, "draft_strategy_comparison.png"), dpi=300)
+        plt.close()
     
     # Return summary
     return {
@@ -831,7 +876,23 @@ def run_draft_simulations(projections, league_info, roster_limits, scoring_setti
     }
 
 def run_season_simulations(draft_results, league_info, results_dir):
-
+    """
+    Simulate seasons based on draft results
+    
+    Parameters:
+    -----------
+    draft_results : dict
+        Results from draft simulations
+    league_info : dict
+        Dictionary containing league information
+    results_dir : str
+        Directory to save results
+        
+    Returns:
+    --------
+    dict
+        Dictionary of season simulation results
+    """
     logger.info("Running season simulations...")
     
     # Ensure results directory exists
@@ -846,20 +907,10 @@ def run_season_simulations(draft_results, league_info, results_dir):
     strategy_metrics = {strategy: [] for strategy in DRAFT_STRATEGIES_TO_TEST}
     
     # Configure season parameters based on league settings
-    num_regular_weeks = NUM_REGULAR_WEEKS
-    num_playoff_teams = NUM_PLAYOFF_TEAMS
-    
-    # Override with actual league settings if available
-    if league_info:
-        settings = league_info.get('settings', {})
-        if isinstance(settings, dict):
-            # Regular season weeks
-            if 'scheduleSettings' in settings and 'matchupPeriodCount' in settings['scheduleSettings']:
-                num_regular_weeks = settings['scheduleSettings']['matchupPeriodCount']
-            
-            # Playoff teams
-            if 'scheduleSettings' in settings and 'playoffTeamCount' in settings['scheduleSettings']:
-                num_playoff_teams = settings['scheduleSettings']['playoffTeamCount']
+    num_regular_weeks = league_info.get('schedule_settings', {}).get('regular_season_weeks', 14)
+    num_playoff_teams = league_info.get('league_info', {}).get('playoff_teams', 6)
+    num_playoff_weeks = league_info.get('schedule_settings', {}).get('playoff_matchup_period_length', 3)
+    nfl_games_per_player = league_info.get('league_info', {}).get('nfl_games_per_player', 17)
     
     logger.info(f"Season settings: {num_regular_weeks} regular weeks, {num_playoff_teams} playoff teams")
     
@@ -1020,49 +1071,71 @@ def run_season_simulations(draft_results, league_info, results_dir):
         "evaluations": all_evaluations
     }
 
-def train_rl_model(projections, league_info, roster_limits, scoring_settings, models_dir):
+
+def train_ppo_model(projections, league_info, roster_limits, scoring_settings, models_dir, projection_models=None):
     """
-    Train an RL model for draft optimization
+    Train a PPO model for draft optimization
     
     Parameters:
     -----------
     projections : dict
-        Dictionary containing player projections by position
+        Dictionary of player projections by position
     league_info : dict
         Dictionary containing league information
     roster_limits : dict
-        Dictionary containing roster position limits
+        Dictionary of roster position limits
     scoring_settings : dict
-        Dictionary containing scoring settings
+        Dictionary of scoring settings
     models_dir : str
-        Directory to save trained models
+        Directory to save models
+    projection_models : dict, optional
+        Dictionary of pre-loaded projection models by position
         
     Returns:
     --------
-    dict
-        Training results
+    tuple
+        (PPO model, training results)
     """
-    logger.info("Training RL draft model...")
+    logger.info("Training PPO model for draft optimization...")
     
-    # Ensure models directory exists
-    os.makedirs(models_dir, exist_ok=True)
+    # Make sure we have projection models
+    if projection_models is None:
+        logger.info("Loading projection models...")
+        projection_loader = ProjectionModelLoader(models_dir)
+        projection_models = projection_loader.models
+        
+        # Check if we loaded any models
+        if not projection_models:
+            logger.warning("No projection models found! Using default features.")
+        else:
+            logger.info(f"Loaded {len(projection_models)} projection models: {list(projection_models.keys())}")
     
-    # Create specific directory for RL models
-    rl_models_dir = os.path.join(models_dir, "rl_models")
-    os.makedirs(rl_models_dir, exist_ok=True)
+    # Create directory for PPO models
+    ppo_models_dir = os.path.join(models_dir, 'ppo_models')
+    os.makedirs(ppo_models_dir, exist_ok=True)
+    
+    # Check if pre-trained model should be used
+    if USE_EXISTING_PPO_MODEL and os.path.exists(PPO_MODEL_PATH + "_actor.weights.h5"):
+        logger.info(f"Loading existing PPO model from {PPO_MODEL_PATH}")
+        try:
+            ppo_model = PPODrafter.load_model(PPO_MODEL_PATH)
+            # Return early with the loaded model
+            return ppo_model, {"loaded_from": PPO_MODEL_PATH}
+        except Exception as e:
+            logger.error(f"Error loading PPO model: {e}")
+            logger.info("Will train a new model instead")
     
     # Extract league size
     league_size = league_info.get('league_info', {}).get('team_count', 10)
     
     # Prepare baseline values for VBD
-    # Define baseline indices by position (typically the last starter at each position)
     baseline_indices = {
-        "QB": league_size,  # Last starting QB
-        "RB": league_size * 2 + 2,  # Last starting RB including 2 FLEX
-        "WR": league_size * 2 + 2,  # Last starting WR including 2 FLEX
-        "TE": league_size,  # Last starting TE
-        "K": league_size,  # Last starting K
-        "DST": league_size  # Last starting DST
+        "QB": league_size,
+        "RB": league_size * 2 + 2,
+        "WR": league_size * 2 + 2,
+        "TE": league_size,
+        "K": league_size,
+        "DST": league_size
     }
     
     # Calculate baseline values
@@ -1070,172 +1143,488 @@ def train_rl_model(projections, league_info, roster_limits, scoring_settings, mo
     for position, df in projections.items():
         pos = position.upper()
         if df is not None and not df.empty and "projected_points" in df.columns:
-            # Sort by projected points
             sorted_df = df.sort_values("projected_points", ascending=False)
-            
-            # Get the baseline player
             index = baseline_indices.get(pos, 0)
             if index < len(sorted_df):
                 vbd_baseline[pos] = sorted_df.iloc[index]["projected_points"]
             else:
-                # If not enough players, use the last player's points
                 vbd_baseline[pos] = sorted_df.iloc[-1]["projected_points"] if not sorted_df.empty else 0
     
     # Load players from projections
     all_players = DraftSimulator.load_players_from_projections(projections, vbd_baseline)
     
-    # Log players loaded by position
-    position_counts = {}
-    for player in all_players:
-        position_counts[player.position] = position_counts.get(player.position, 0) + 1
-    
-    logger.info(f"Loaded {len(all_players)} players for RL training:")
-    for pos, count in position_counts.items():
-        logger.info(f"  {pos}: {count} players")
-    
-    # Configure season parameters based on league settings
-    num_regular_weeks = NUM_REGULAR_WEEKS
-    num_playoff_teams = NUM_PLAYOFF_TEAMS
-    
-    # Override with actual league settings if available
-    if league_info:
-        settings = league_info.get('settings', {})
-        if isinstance(settings, dict):
-            # Regular season weeks
-            if 'scheduleSettings' in settings and 'matchupPeriodCount' in settings['scheduleSettings']:
-                num_regular_weeks = settings['scheduleSettings']['matchupPeriodCount']
-            
-            # Playoff teams
-            if 'scheduleSettings' in settings and 'playoffTeamCount' in settings['scheduleSettings']:
-                num_playoff_teams = settings['scheduleSettings']['playoffTeamCount']
-    
-    logger.info(f"Season settings: {num_regular_weeks} regular weeks, {num_playoff_teams} playoff teams")
-    
-    # Create simulators
-    draft_sim = DraftSimulator(
-        players=all_players.copy(),
+    # Create draft simulator with projection models
+    draft_simulator = DraftSimulator(
+        players=all_players,
         league_size=league_size,
         roster_limits=roster_limits,
-        num_rounds=sum(roster_limits.values()),
-        scoring_settings=scoring_settings
+        num_rounds=18,  # Standard number of rounds
+        scoring_settings=scoring_settings,
+        user_pick=None,
+        projection_models=projection_models  # Pass projection models here
     )
     
-    season_sim = SeasonSimulator(
-        teams=draft_sim.teams,
-        num_regular_weeks=num_regular_weeks,
-        num_playoff_teams=num_playoff_teams,
+    # Find or create the RL team
+    ppo_draft_position = random.randint(1, league_size)
+    rl_team = next((team for team in draft_simulator.teams 
+                 if team.draft_position == ppo_draft_position), None)
+    if not rl_team:
+        # If no RL team found, set the first team to use RL
+        rl_team = random.choice(draft_simulator.teams)
+        rl_team.strategy = "PPO"
+    
+    # Create a sample state to determine dimensions
+    available_players = [p for p in draft_simulator.players if not p.is_drafted]
+    sample_state = DraftState(
+        team=rl_team,
+        available_players=available_players,
+        round_num=1,
+        overall_pick=1,
+        league_size=draft_simulator.league_size,
+        roster_limits=draft_simulator.roster_limits,
+        max_rounds=draft_simulator.num_rounds,
+    )
+    
+    # Get dimensions from sample state
+    state_dim = len(sample_state.to_feature_vector())
+    action_feature_dim = len(sample_state.get_action_features(0))
+    action_dim = 256  # Maximum number of players to consider at once
+    
+    logger.info(f"State dimension: {state_dim}, Action feature dimension: {action_feature_dim}")
+    
+    # Create PPO model
+    ppo_model = PPODrafter(
+        state_dim=state_dim,
+        action_feature_dim=action_feature_dim,
+        action_dim=action_dim,
+        lr_actor=PPO_LEARNING_RATE,
+        lr_critic=PPO_LEARNING_RATE,
+        gamma=PPO_GAMMA,
+        batch_size=PPO_BATCH_SIZE,
+        policy_clip=PPO_POLICY_CLIP,
+        entropy_coef=PPO_ENTROPY_COEF,
+        use_top_n_features=USE_TOP_N_FEATURES
+    )
+    # Create season simulator for training
+    season_simulator = SeasonSimulator(
+        teams=draft_simulator.teams,
+        num_regular_weeks=NUM_REGULAR_WEEKS,
+        num_playoff_teams=NUM_PLAYOFF_TEAMS,
         num_playoff_weeks=NUM_PLAYOFF_WEEKS,
         randomness=RANDOMNESS_FACTOR
     )
+    # No need to create a season simulator here since we'll use LineupEvaluator in the training method
     
-    # Initialize or load RL model
-    if USE_EXISTING_RL_MODEL and os.path.exists(RL_MODEL_PATH):
-        logger.info(f"Loading existing RL model from {RL_MODEL_PATH}")
-        rl_model = RLDrafter.load_model(RL_MODEL_PATH)
-    else:
-        logger.info("Initializing new RL model")
-        
-        # Create a sample state to determine the input dimension
-        # Find an RL team to use for the sample state
-        rl_team = next((team for team in draft_sim.teams if team.strategy == "RL"), None)
-        if not rl_team:
-            logger.warning("No RL team found in the draft simulator")
-            rl_team = draft_sim.teams[0]  # Use first team as fallback
-        
-        # Create a sample state
-        from src.models.rl_drafter import DraftState
-        sample_state = DraftState(
-            team=rl_team,
-            available_players=all_players,  # Use all players for sample state
-            round_num=1,
-            overall_pick=1,
-            league_size=league_size,
-            roster_limits=roster_limits,
-            max_rounds=draft_sim.num_rounds
-        )
-        
-        # Get a sample feature vector to determine input dimension
-        sample_feature = sample_state.to_feature_vector(0)
-        input_dim = len(sample_feature)
-        
-        logger.info(f"Creating RL model with input dimension {input_dim}")
-        rl_model = RLDrafter(input_dim=input_dim)
+    # Train the model
+    logger.info(f"Training PPO model for {NUM_PPO_EPISODES} episodes")
+    start_time = time.time()
     
-    # Train model with more frequent saving
-    training_results = rl_model.train(
-        draft_simulator=draft_sim,
-        season_simulator=season_sim,
-        num_episodes=NUM_RL_EPISODES,
-        eval_interval=RL_EVAL_INTERVAL,
-        save_interval=1,  # Save after every episode
-        save_path=rl_models_dir
+    training_results = ppo_model.train(
+        draft_simulator=draft_simulator,
+        season_simulator=season_simulator,
+        num_episodes=NUM_PPO_EPISODES,
+        eval_interval=PPO_EVAL_INTERVAL,
+        save_interval=PPO_SAVE_INTERVAL,
+        save_path=ppo_models_dir
     )
     
-    # Create visualizations
-    # 1. Rewards over time
-    plt.figure(figsize=(12, 8))
+    training_time = time.time() - start_time
+    logger.info(f"PPO training completed in {training_time:.2f} seconds")
     
-    rewards = training_results["rewards_history"]
-    episodes = range(1, len(rewards) + 1)
+    # Save final model to the main path
+    ppo_model.save_model(PPO_MODEL_PATH)
     
-    plt.plot(episodes, rewards, 'b-', alpha=0.7)
-    plt.title("RL Training Rewards Over Time")
-    plt.xlabel("Episode")
-    plt.ylabel("Average Reward")
-    plt.grid(True, linestyle='--', alpha=0.7)
+    # Generate learning verification visualizations
+    try:
+        # Either call as a method if you've added it to PPODrafter
+        if hasattr(ppo_model, 'generate_learning_visualizations'):
+            ppo_model.generate_learning_visualizations(output_dir=ppo_models_dir)
+        # Or call the standalone function if you've created it
+        else:
+            # Import it if it's in another module
+            from src.analysis.visualizer import generate_learning_visualizations
+            generate_learning_visualizations(ppo_model, output_dir=ppo_models_dir)
+        
+        logger.info("Generated learning verification visualizations")
+    except Exception as e:
+        logger.error(f"Error generating learning visualizations: {e}")
     
-    # Add trend line
-    if len(rewards) > 1:
-        z = np.polyfit(episodes, rewards, 1)
-        p = np.poly1d(z)
-        plt.plot(episodes, p(episodes), "r--", alpha=0.7)
+    # Create simplified training progress plot if not already created
+    plt.figure(figsize=(12, 6))
+    plt.plot(training_results['rewards_history'])
+    plt.title('PPO Training Progress')
+    plt.xlabel('Episode')
+    plt.ylabel('Reward')
+    plt.grid(True)
+    plt.savefig(os.path.join(ppo_models_dir, 'training_progress.png'))
     
-    # Save figure
-    plt.tight_layout()
-    plt.savefig(os.path.join(models_dir, "rl_reward_history.png"), dpi=300)
-    plt.close()
-    
-    # 2. Win rates by strategy
-    if training_results["win_rates"]:
-        plt.figure(figsize=(12, 8))
+    # Plot win rates if available
+    if training_results['win_rates']:
+        plt.figure(figsize=(12, 6))
         
         # Extract win rates for each strategy
-        strategies = list(training_results["win_rates"][0].keys())
-        win_rates = {strategy: [] for strategy in strategies}
+        strategies = list(training_results['win_rates'][0].keys())
+        for strategy in strategies:
+            win_rates = [wr.get(strategy, 0) for wr in training_results['win_rates']]
+            plt.plot(
+                range(PPO_EVAL_INTERVAL, NUM_PPO_EPISODES + 1, PPO_EVAL_INTERVAL),
+                win_rates,
+                label=strategy
+            )
         
-        for wr in training_results["win_rates"]:
-            for strategy, rate in wr.items():
-                win_rates[strategy].append(rate)
-        
-        # Plot win rates for each strategy
-        for strategy, rates in win_rates.items():
-            evals = range(RL_EVAL_INTERVAL, len(rates) * RL_EVAL_INTERVAL + 1, RL_EVAL_INTERVAL)
-            plt.plot(evals, rates, label=strategy)
-        
-        plt.title("Win Rates by Strategy During Training")
-        plt.xlabel("Episode")
-        plt.ylabel("Win Rate")
+        plt.title('Win Rates by Strategy')
+        plt.xlabel('Episode')
+        plt.ylabel('Win Rate')
         plt.legend()
-        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.grid(True)
+        plt.savefig(os.path.join(ppo_models_dir, 'win_rates.png'))
+    return ppo_model, training_results
+
+
+def evaluate_ppo_model(ppo_model, projections, league_info, roster_limits, scoring_settings, output_dir, projection_models=None ):
+    """
+    Evaluate the PPO model with multiple draft simulations
+    
+    Parameters:
+    -----------
+    ppo_model : PPODrafter
+        Trained PPO model
+    projections : dict
+        Dictionary of player projections by position
+    league_info : dict
+        Dictionary containing league information
+    roster_limits : dict
+        Dictionary of roster position limits
+    scoring_settings : dict
+        Dictionary of scoring settings
+    output_dir : str
+        Directory to save evaluation results
         
-        # Save figure
-        plt.tight_layout()
-        plt.savefig(os.path.join(models_dir, "rl_win_rates.png"), dpi=300)
-        plt.close()
+    Returns:
+    --------
+    dict
+        Evaluation results
+    """
+    logger.info("Evaluating PPO model...")
     
-    # Also save final model to the main model directory for easy access
-    final_model_path = os.path.join(models_dir, "rl_drafter_final")
-    if os.path.exists(os.path.join(rl_models_dir, "rl_drafter_final.keras")):
-        shutil.copy(os.path.join(rl_models_dir, "rl_drafter_final.keras"), final_model_path + ".keras")
-    elif os.path.exists(os.path.join(rl_models_dir, "rl_drafter_final.pkl")):
-        shutil.copy(os.path.join(rl_models_dir, "rl_drafter_final.pkl"), final_model_path + ".pkl")
+    # Create output directory
+    eval_dir = os.path.join(output_dir, 'ppo_evaluation')
+    os.makedirs(eval_dir, exist_ok=True)
+    # If no projection models provided, load them
+    if projection_models is None:
+        projection_loader = ProjectionModelLoader()
+        projection_models = projection_loader.models
+    # Extract league size
+    league_size = league_info.get('league_info', {}).get('team_count', 10)
     
-    # Return training results
-    return training_results
-    return training_results
+    # Number of trials to run
+    num_trials = 20
+    
+    # Prepare baseline values for VBD
+    baseline_indices = {
+        "QB": league_size,
+        "RB": league_size * 2 + 2,
+        "WR": league_size * 2 + 2,
+        "TE": league_size,
+        "K": league_size,
+        "DST": league_size
+    }
+    
+    # Calculate baseline values
+    vbd_baseline = {}
+    for position, df in projections.items():
+        pos = position.upper()
+        if df is not None and not df.empty and "projected_points" in df.columns:
+            sorted_df = df.sort_values("projected_points", ascending=False)
+            index = baseline_indices.get(pos, 0)
+            if index < len(sorted_df):
+                vbd_baseline[pos] = sorted_df.iloc[index]["projected_points"]
+            else:
+                vbd_baseline[pos] = sorted_df.iloc[-1]["projected_points"] if not sorted_df.empty else 0
+    
+    # Results tracking
+    rewards = []
+    ranks = []
+    win_rates = {}
+    
+    # Run trials
+    for trial in range(num_trials):
+        logger.info(f"Running evaluation trial {trial+1}/{num_trials}")
+        
+        # Load fresh players for each trial
+        all_players = DraftSimulator.load_players_from_projections(projections, vbd_baseline)
+        
+        # Create draft simulator
+        draft_simulator = DraftSimulator(
+            players=all_players,
+            league_size=league_size,
+            roster_limits=roster_limits,
+            num_rounds=18,
+            scoring_settings=scoring_settings,
+            user_pick=None,
+            projection_models=projection_models 
+        )
+        
+        # Find or create a team that will use PPO
+        ppo_team = None
+        for team in draft_simulator.teams:
+            if team.strategy == "RL":
+                team.strategy = "PPO"  # Rename to PPO
+                ppo_team = team
+                break
+        
+        if not ppo_team:
+            # If no suitable team found, set the first team to use PPO
+            ppo_team = random.choice(draft_simulator.teams)
+            ppo_team.strategy = "PPO"
+        
+        # Run draft simulation
+        current_round = 1
+        current_pick = 1
+        
+        # Run until draft completion
+        while current_round <= draft_simulator.num_rounds:
+            # Determine team picking
+            team_idx = (current_pick - 1) % draft_simulator.league_size
+            if current_round % 2 == 0:  # Snake draft
+                team_idx = draft_simulator.league_size - 1 - team_idx
+            
+            team = draft_simulator.teams[team_idx]
+            
+            # If this is the PPO team, use our model in evaluation mode
+            if team.strategy == "PPO":
+                # Get available players
+                available_players = [p for p in draft_simulator.players if not p.is_drafted]
+                
+                # Create state
+                state = DraftState(
+                    team=team,
+                    available_players=available_players,
+                    round_num=current_round,
+                    overall_pick=current_pick,
+                    league_size=draft_simulator.league_size,
+                    roster_limits=draft_simulator.roster_limits,
+                    max_rounds=draft_simulator.num_rounds,
+                )
+                
+                # Select action (without training)
+                action, _, _ = ppo_model.select_action(state, training=False)
+                
+                # Execute action
+                if action is not None and action < len(state.valid_players):
+                    player = state.valid_players[action]
+                    team.add_player(player, current_round, current_pick)
+                else:
+                    # Fallback to best available
+                    draft_simulator._make_pick(team, current_round, current_pick)
+            else:
+                # Use simulator's strategy
+                draft_simulator._make_pick(team, current_round, current_pick)
+            
+            # Move to next pick
+            current_pick += 1
+            if current_pick > current_round * draft_simulator.league_size:
+                current_round += 1
+        
+        # Use LineupEvaluator instead of SeasonSimulator
+        # lineup_evaluator = LineupEvaluator(
+        #     teams=draft_simulator.teams,
+        #     num_weeks=17,
+        #     randomness=0.2,
+        #     injury_chance=0.05
+        # )
+        # lineup_results = lineup_evaluator.evaluate_teams()
+        
+        # # Use SeasonEvaluator with lineup results
+        # evaluation = SeasonEvaluator(draft_simulator.teams, lineup_results)
+        
+        # Simulate season
+        season_simulator = SeasonSimulator(
+            teams=draft_simulator.teams,
+            num_regular_weeks=NUM_REGULAR_WEEKS,
+            num_playoff_teams=NUM_PLAYOFF_TEAMS,
+            num_playoff_weeks=NUM_PLAYOFF_WEEKS,
+            randomness=RANDOMNESS_FACTOR
+        )
+        
+        season_results = season_simulator.simulate_season()
+        evaluation = SeasonEvaluator(draft_simulator.teams, season_results)
+        # Get PPO team results
+        ppo_metrics = None
+        for metrics in evaluation.metrics["PPO"]["teams"]:
+            if metrics["team_name"] == ppo_team.name:
+                ppo_metrics = metrics
+                break
+        
+        if ppo_metrics:
+            # Calculate reward using the same logic as in training
+            reward = (
+                -1.0 * ppo_metrics["rank"] +
+                2.0 * ppo_metrics["wins"] +
+                0.02 * ppo_metrics["points_for"] +
+                10.0 * (1 if ppo_metrics.get("playoff_result") == "Champion" else 0) +
+                5.0 * (1 if ppo_metrics.get("playoff_result") in ["Runner-up", "Third Place"] else 0) +
+                2.0 * (1 if ppo_metrics.get("playoff_result") == "Playoff Qualification" else 0)
+            )
+            
+            rewards.append(reward)
+            ranks.append(ppo_metrics["rank"])
+            
+            logger.info(f"Trial {trial+1} - Reward: {reward:.2f}, Rank: {ppo_metrics['rank']}")
+        
+        # Track win rates
+        for strategy, metrics in evaluation.metrics.items():
+            if strategy not in win_rates:
+                win_rates[strategy] = []
+            
+            win_rate = metrics["avg_wins"] / (metrics["avg_wins"] + metrics.get("avg_losses", 0))
+            win_rates[strategy].append(win_rate)
+    
+    # Calculate average metrics
+    avg_reward = sum(rewards) / len(rewards) if rewards else 0
+    avg_rank = sum(ranks) / len(ranks) if ranks else 0
+    avg_win_rates = {s: sum(rates) / len(rates) for s, rates in win_rates.items()}
+    
+    logger.info(f"PPO Evaluation results:")
+    logger.info(f"  Average reward: {avg_reward:.2f}")
+    logger.info(f"  Average rank: {avg_rank:.2f}")
+    logger.info(f"  Win rates by strategy:")
+    for strategy, rate in avg_win_rates.items():
+        logger.info(f"    {strategy}: {rate:.3f}")
+    
+    # Create evaluation plots
+    # Rank distribution plot
+    plt.figure(figsize=(10, 6))
+    sns.histplot(ranks, bins=range(1, max(ranks) + 2), kde=True)
+    plt.title('PPO Rank Distribution')
+    plt.xlabel('Rank')
+    plt.ylabel('Frequency')
+    plt.savefig(os.path.join(eval_dir, 'rank_distribution.png'))
+    
+    # Win rate comparison plot
+    plt.figure(figsize=(12, 6))
+    strategies = list(avg_win_rates.keys())
+    win_rates_values = [avg_win_rates[s] for s in strategies]
+    
+    plt.bar(strategies, win_rates_values)
+    plt.title('Average Win Rate by Strategy')
+    plt.xlabel('Strategy')
+    plt.ylabel('Win Rate')
+    plt.ylim(0, max(win_rates_values) * 1.2)
+    
+    # Add win rate values on top of bars
+    for i, v in enumerate(win_rates_values):
+        plt.text(i, v + 0.01, f"{v:.3f}", ha='center')
+    
+    plt.savefig(os.path.join(eval_dir, 'win_rate_comparison.png'))
+    
+    # Save results to JSON
+    results = {
+        'avg_reward': avg_reward,
+        'avg_rank': avg_rank,
+        'avg_win_rates': avg_win_rates,
+        'ranks': ranks,
+        'rewards': rewards
+    }
+    
+    with open(os.path.join(eval_dir, 'evaluation_results.json'), 'w') as f:
+        # Convert numpy arrays to lists for JSON serialization
+        for key, value in results.items():
+            if isinstance(value, np.ndarray):
+                results[key] = value.tolist()
+            elif isinstance(value, dict):
+                for k, v in value.items():
+                    if isinstance(v, np.ndarray):
+                        results[key][k] = v.tolist()
+        
+        json.dump(results, f, indent=2)
+    
+    return results
+
+def load_league_settings(league_id, year, espn_s2, swid):
+    """Load league settings from ESPN API or config file"""
+    # First, try to generate/update the config file
+    try:
+        from generate_config import generate_config
+        config_generated = generate_config(league_id, year, espn_s2, swid)
+        logger.info("Config file successfully generated/updated")
+    except Exception as e:
+        logger.warning(f"Failed to generate config file: {e}")
+        config_generated = False
+    
+    # Try to load league data from ESPN API
+    try:
+        league_data = load_espn_league_data(league_id, year, espn_s2, swid)
+        
+        if league_data:
+            # Extract roster limits and scoring settings from league data
+            roster_limits = league_data.get('roster_settings', {})
+            scoring_settings = league_data.get('scoring_settings', {})
+            
+            logger.info(f"Successfully loaded league settings from ESPN API")
+            return league_data, roster_limits, scoring_settings
+    except Exception as e:
+        logger.warning(f"Error loading from ESPN API: {e}")
+    
+    # If API failed, try loading from config file
+    try:
+        config_path = "configs/league_settings.json"
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+            
+            roster_limits = config.get('roster_settings', {})
+            scoring_settings = config.get('scoring_settings', {})
+            
+            logger.info(f"Successfully loaded league settings from config file")
+            return config, roster_limits, scoring_settings
+        else:
+            logger.warning(f"Config file not found: {config_path}")
+    except Exception as e:
+        logger.warning(f"Error loading config file: {e}")
+    
+    # Only as a last resort, use minimal defaults
+    logger.error("Could not load league settings from API or config file. Using minimal defaults.")
+    
+    # Create minimal league data with defaults
+    league_data = {
+        "league_info": {
+            "name": "Default League",
+            "team_count": 10,
+            "playoff_teams": 6
+        }
+    }
+    
+    # These should be replaced with API data, we only include defaults as a fallback
+    roster_limits = {
+        "QB": 3,
+        "RB": 10,
+        "WR": 10,
+        "TE": 2,
+        "FLEX": 10,
+        "D/ST": 10,
+        "K": 10,
+        "BE": 8,
+        "IR": 1
+    }
+    
+    scoring_settings = {
+        "passing_yards": 0.04,
+        "passing_td": 4,
+        "interception": -2,
+        "rushing_yards": 0.1,
+        "rushing_td": 6,
+        "receiving_yards": 0.1,
+        "receiving_td": 6,
+        "reception": 0.5,
+        "fumble_lost": -2
+    }
+    
+    return league_data, roster_limits, scoring_settings
+
+
 
 def main():
-    """Main function to run the fantasy football analysis pipeline"""
     start_time = datetime.now()
     logger.info(f"Starting fantasy football analysis at {start_time}")
     
@@ -1244,10 +1633,26 @@ def main():
     
     # Use config values if available, otherwise use the ones defined at the top
     league_id = config.get('league_id', LEAGUE_ID)
-    year = config.get('year', LEAGUE_YEAR)
+    year = config.get('league_year', LEAGUE_YEAR)
     espn_s2 = config.get('espn_s2', ESPN_S2)
     swid = config.get('swid', SWID)
     start_year = config.get('start_year', START_YEAR)
+    
+    # Load league settings
+    league_data, roster_limits, scoring_settings = load_league_settings(league_id, year, espn_s2, swid)
+    
+    # roster_limits = {
+    #         "QB": 3,  # Maximum 3 QBs
+    #         "RB": 10,  # Effectively unlimited
+    #         "WR": 10,  # Effectively unlimited
+    #         "TE": 3,  # Effectively unlimited
+    #         "K": 3,    # Effectively unlimited
+    #         "DST": 3,  # Effectively unlimited
+    #         "BE": 8,  # Calculated bench spots
+    #         "IR": 1    # One IR spot
+    #     }
+    
+    roster_limits = config.get('roster_settings', {})
     
     # Cache options from config
     use_cached_raw = config.get('use_cached_raw_data', USE_CACHED_RAW_DATA)
@@ -1259,7 +1664,7 @@ def main():
     # Simulation options from config
     run_draft_sims = config.get('run_draft_simulations', RUN_DRAFT_SIMULATIONS)
     run_season_sims = config.get('run_season_simulations', RUN_SEASON_SIMULATIONS)
-    train_rl = config.get('train_rl_model', TRAIN_RL_MODEL)
+    train_ppo = config.get('train_ppo_model', TRAIN_PPO_MODEL)
     
     if league_id is None:
         logger.error("League ID is required. Set LEAGUE_ID at the top of the script.")
@@ -1288,8 +1693,7 @@ def main():
         else:
             json.dump(league_data, f, indent=2)
     
-    # Extract roster limits and scoring settings
-    roster_limits, scoring_settings = extract_league_settings(league_data)
+    
     
     # Step 2: Load NFL data (either from cache or fresh download)
     years = list(range(start_year, year + 1))
@@ -1436,14 +1840,17 @@ def main():
         
         # Advanced ML-focused visualizations
         logger.info("Creating advanced ML visualizations...")
-        ml_explorer = MLExplorer(
-            data_dict=processed_data,
-            feature_sets=feature_sets,
-            output_dir=OUTPUT_DIR
+        analyzer = FantasyFootballAnalyzer(
+            league_id=league_id,
+            year=year,
+            espn_s2=espn_s2,
+            swid=swid
         )
         
-        # Run advanced ML analyses
-        ml_explorer.run_advanced_eda()
+        # Run exploratory data analysis
+        analyzer.explore_league_settings()
+        for position in ['QB', 'RB', 'WR', 'TE']:
+            analyzer.explore_player_data(position)
     else:
         logger.info("Skipping visualizations as specified in configuration")
     
@@ -1478,6 +1885,14 @@ def main():
         logger.info(f"Generating projections for {PROJECTION_YEAR}...")
         projections = projection_model.generate_full_projections(projection_filters, use_do_not_draft=USE_DO_NOT_DRAFT)
         
+        # Cache projections for draft assistant
+        try:
+            with open(os.path.join(MODELS_DIR, 'player_projections.pkl'), 'wb') as f:
+                pickle.dump(projections, f)
+            logger.info("Cached player projections for draft assistant")
+        except Exception as e:
+            logger.error(f"Error caching projections: {e}")
+        
     else:
         logger.info("Skipping model training and evaluation as specified in configuration")
         
@@ -1497,10 +1912,47 @@ def main():
                 except Exception as e:
                     logger.error(f"Error loading pre-trained model: {e}")
     
-    # Step 7: Run draft simulations if requested
+    
+    # Step 7: Train PPO model if requested
+    ppo_model = None
+    if train_ppo:
+        logger.info("Step 7: Training PPO reinforcement learning model...")
+        projection_loader = ProjectionModelLoader()
+        projection_models = projection_loader.models
+        # Train PPO model
+        ppo_model, ppo_results = train_ppo_model(
+            projections=projections,
+            league_info=league_data,
+            roster_limits=roster_limits,
+            scoring_settings=scoring_settings,
+            models_dir=MODELS_DIR,
+            projection_models=projection_models 
+        )
+        
+        # Evaluate PPO model
+        ppo_eval_results = evaluate_ppo_model(
+            ppo_model=ppo_model,
+            projections=projections,
+            league_info=league_data,
+            roster_limits=roster_limits,
+            scoring_settings=scoring_settings,
+            output_dir=OUTPUT_DIR,
+            projection_models=projection_models 
+        )
+        
+        logger.info(f"PPO model training and evaluation complete")
+    elif USE_EXISTING_PPO_MODEL:
+        logger.info(f"Loading existing PPO model from {PPO_MODEL_PATH}")
+        try:
+            ppo_model = PPODrafter.load_model(PPO_MODEL_PATH)
+            logger.info("Successfully loaded PPO model")
+        except Exception as e:
+            logger.error(f"Error loading PPO model: {e}")
+    
+    # Step 8: Run draft simulations if requested
     draft_results = None
     if run_draft_sims and projections:
-        logger.info("Step 7: Running draft simulations...")
+        logger.info("Step 8: Running draft simulations...")
         
         # Create output directory
         draft_results_dir = os.path.join(OUTPUT_DIR, 'draft_simulations')
@@ -1512,6 +1964,7 @@ def main():
             league_info=league_data,
             roster_limits=roster_limits,
             scoring_settings=scoring_settings,
+            ppo_model=ppo_model,  # Pass PPO model if available
             results_dir=draft_results_dir
         )
         
@@ -1519,10 +1972,10 @@ def main():
     elif run_draft_sims:
         logger.warning("Cannot run draft simulations without projections")
     
-    # Step 8: Run season simulations if requested
+    # Step 9: Run season simulations if requested
     season_results = None
     if run_season_sims and draft_results:
-        logger.info("Step 8: Running season simulations...")
+        logger.info("Step 9: Running season simulations...")
         
         # Create output directory
         season_results_dir = os.path.join(OUTPUT_DIR, 'season_simulations')
@@ -1539,23 +1992,6 @@ def main():
     elif run_season_sims:
         logger.warning("Cannot run season simulations without draft results")
     
-    # Step 9: Train RL model if requested
-    rl_results = None
-    if train_rl and projections:
-        logger.info("Step 9: Training reinforcement learning model...")
-        
-        # Train RL model
-        rl_results = train_rl_model(
-            projections=projections,
-            league_info=league_data,
-            roster_limits=roster_limits,
-            scoring_settings=scoring_settings,
-            models_dir=MODELS_DIR
-        )
-        
-        logger.info("RL model training complete")
-    elif train_rl:
-        logger.warning("Cannot train RL model without projections")
     
     # Summarize results
     end_time = datetime.now()
@@ -1598,12 +2034,15 @@ def main():
         print("\nSeason Simulation Results:")
         print(season_results['summary_df'].to_string(index=False))
     
-    # Display RL training results if available
-    if rl_results:
-        print("\nRL Model Training Results:")
-        print(f"  Episodes trained: {NUM_RL_EPISODES}")
-        print(f"  Final epsilon: {rl_results['final_epsilon']:.4f}")
-        print(f"  Best reward: {rl_results['best_reward']:.2f}")
+    # Display PPO training status if available
+    if ppo_model:
+        print("\nPPO Model:")
+        print(f"  Status: {'Trained' if train_ppo else 'Loaded from existing model'}")
+        print(f"  Model path: {PPO_MODEL_PATH}")
+    
+    print("\nDraft Assistant Script:")
+    print(f"  Path: {os.path.join(MODELS_DIR, 'draft_assistant.py')}")
+    print(f"  Usage: python {os.path.join(MODELS_DIR, 'draft_assistant.py')} [draft_position]")
     
     print("\nAnalysis completed successfully!")
     print(f"Output data and visualizations saved to the '{DATA_DIR}' directory")
@@ -1615,135 +2054,11 @@ def main():
         "feature_sets": feature_sets,
         "dropped_tiers": dropped_tiers,
         "projections": projections,
+        "ppo_model": ppo_model,
         "draft_results": draft_results,
-        "season_results": season_results,
-        "rl_results": rl_results
-    }
-
-def extract_league_settings(league_data):
-    """
-    Extract roster limits and scoring settings from league data
-    
-    Parameters:
-    -----------
-    league_data : Dict[str, Any]
-        League information from ESPN API
-        
-    Returns:
-    --------
-    Tuple[Dict[str, int], Dict[str, Any]]
-        Tuple of (roster_limits, scoring_settings)
-    """
-    # Default roster limits
-    roster_limits = {
-    "QB": 3,
-    "RB": 10,
-    "WR": 10,
-    "TE": 4}
-    
-    # Default scoring settings
-    scoring_settings = {
-        "PA0": 5.0,
-        "PA1": 4.0,
-        "PA28": -1.0,
-        "2PRET": 2.0,
-        "YA449": -3.0,
-        "RTD": 6.0,
-        "1PSF": 1.0,
-        "FUML": -2.0,
-        "YA499": -5.0,
-        "INT": 2.0,
-        "YA549": -6.0,
-        "YA550": -7.0,
-        "BLKKRTD": 6.0,
-        "SF": 2.0,
-        "PA7": 3.0,
-        "FR": 2.0,
-        "BLKK": 2.0,
-        "2PC": 2.0,
-        "RETD": 6.0,
-        "INTT": -2.0,
-        "PTD": 4.0,
-        "PRTD": 6.0,
-        "RY": 0.1,
-        "REC": 0.5,
-        "INTTD": 6.0,
-        "FTD": 6.0,
-        "KRTD": 6.0,
-        "FG0": 3.0,
-        "2PR": 2.0,
-        "FRTD": 6.0,
-        "FG40": 4.0,
-        "PA14": 1.0,
-        "YA100": 5.0,
-        "SK": 1.0,
-        "PA46": -5.0,
-        "FGM": -1.0,
-        "PY": 0.04,
-        "PA35": -3.0,
-        "YA399": -1.0,
-        "PAT": 1.0,
-        "REY": 0.1,
-        "YA199": 3.0,
-        "2PRE": 2.0,
-        "YA299": 2.0,
-        "FG60": 6.0,
-        "FG50": 5.0
+        "season_results": season_results
     }
     
-    # Get settings from league data if available
-    if league_data and 'settings' in league_data:
-        settings = league_data['settings']
-        
-        # Extract roster limits
-        if hasattr(settings, 'position_slot_counts') and isinstance(settings.position_slot_counts, dict):
-            for pos, count in settings.position_slot_counts.items():
-                if pos in roster_limits:
-                    roster_limits[pos] = count
-        
-        # Extract scoring format
-        if hasattr(settings, 'scoring_format') and isinstance(settings.scoring_format, list):
-            for item in settings.scoring_format:
-                # Convert ESPN scoring to our format
-                if item['abbr'] == 'PY':
-                    scoring_settings['passing_yards'] = item['points']
-                elif item['abbr'] == 'PTD':
-                    scoring_settings['passing_td'] = item['points']
-                elif item['abbr'] == 'INT':
-                    scoring_settings['interception'] = item['points']
-                elif item['abbr'] == 'RY':
-                    scoring_settings['rushing_yards'] = item['points']
-                elif item['abbr'] == 'RTD':
-                    scoring_settings['rushing_td'] = item['points']
-                elif item['abbr'] == 'REY':
-                    scoring_settings['receiving_yards'] = item['points']
-                elif item['abbr'] == 'RETD':
-                    scoring_settings['receiving_td'] = item['points']
-                elif item['abbr'] == 'REC':
-                    scoring_settings['reception'] = item['points']
-                elif item['abbr'] == 'FUML':
-                    scoring_settings['fumble_lost'] = item['points']
-    
-    # Add roster settings for starter lineup slots
-    scoring_settings['starter_limits'] = {
-        "QB": 1,
-        "RB": 2,
-        "WR": 3,
-        "TE": 1,
-        "FLEX": 2,
-        "K": 0,
-        "DST": 0,
-        "OP": 1
-    }
-    
-    # Get starter slots from league data if available
-    if league_data and 'settings' in league_data:
-        settings = league_data['settings']
-        # Extract lineup settings if available (implementation depends on ESPN API structure)
-    
-    return roster_limits, scoring_settings
-
 
 if __name__ == "__main__":
     main()
-    

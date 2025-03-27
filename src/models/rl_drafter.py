@@ -32,7 +32,7 @@ class DraftState:
     
     def __init__(self, team: Team, available_players: List[Player], 
                  round_num: int, overall_pick: int, league_size: int, 
-                 roster_limits: Dict[str, int], max_rounds: int = 16):
+                 roster_limits: Dict[str, int], max_rounds: int = 8):
         """
         Initialize a draft state
         
@@ -557,7 +557,7 @@ class RLDrafter:
                 team = draft_simulator.teams[team_idx]
                 
                 # If this is the RL team, use our model
-                if team.strategy == "RL":
+                if team.strategy == "PPO":
                     # Get available players
                     available_players = [p for p in draft_simulator.players if not p.is_drafted]
                     
@@ -606,11 +606,11 @@ class RLDrafter:
             evaluation = SeasonEvaluator(draft_simulator.teams, season_results)
             
             # Calculate reward for RL team
-            rl_team = next((team for team in draft_simulator.teams if team.strategy == "RL"), None)
+            rl_team = next((team for team in draft_simulator.teams if team.strategy == "PPO"), None)
             if rl_team:
                 # Get team's metrics
                 rl_metrics = None
-                for metrics in evaluation.metrics["RL"]["teams"]:
+                for metrics in evaluation.metrics["PPO"]["teams"]:
                     if metrics["team_name"] == rl_team.name:
                         rl_metrics = metrics
                         break

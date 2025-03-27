@@ -1,18 +1,8 @@
-"""
-Draft Simulator for Fantasy Football
-
-This module implements a draft simulator that can use different draft strategies:
-- Value-Based Drafting (VBD)
-- ESPN Autopick Algorithm
-- Position-based strategies (0RB, Hero RB, 2RB)
-- Reinforcement Learning-based approach
-"""
+import random
 import pandas as pd
-import os
 import numpy as np
 import logging
-import random
-from typing import List, Dict, Tuple, Optional, Callable
+from typing import List, Dict, Tuple, Optional, Any
 from collections import defaultdict
 
 # Set up logging
@@ -139,7 +129,11 @@ class Team:
         player.drafted_team = self
         
         self.roster.append(player)
-        self.roster_by_position[player.position].append(player)
+        
+        # Add to position-specific roster
+        position = player.position
+        self.roster_by_position[position].append(player)
+        
         self.draft_picks[round_num] = player
     
     def can_draft_position(self, position: str) -> bool:
@@ -149,34 +143,95 @@ class Team:
         Parameters:
         -----------
         position : str
-            Player position
-            
+            Player position or roster slot
+                
         Returns:
         --------
         bool
             True if the team can draft a player at the position, False otherwise
         """
-        current_count = len(self.roster_by_position.get(position, []))
-        max_count = self.roster_limits.get(position, 0)
+        # Define position mappings for flexible slots
+        flexible_slots = {
+            "FLEX": ["RB", "WR", "TE"],
+            "RB/WR": ["RB", "WR"],
+            "WR/TE": ["WR", "TE"],
+            "RB/WR/TE": ["RB", "WR", "TE"],
+            "OP": ["QB", "RB", "WR", "TE"],
+            "DP": ["DL", "LB", "DB", "DE", "DT", "CB", "S"],
+            "BE": ["QB", "RB", "WR", "TE", "K", "DST", "DL", "LB", "DB", "DE", "DT", "CB", "S"],
+            "IR": ["QB", "RB", "WR", "TE", "K", "DST", "DL", "LB", "DB", "DE", "DT", "CB", "S"],
+        }
         
-        # Special handling for bench (BE) players - they can be any position
+        # For standard positions, check direct limits
+        if position in ["QB", "RB", "WR", "TE", "K", "DST", "DL", "LB", "DB"]:
+            current_count = len(self.roster_by_position.get(position, []))
+            max_count = self.roster_limits.get(position, 0)
+            
+            if current_count >= max_count:
+                return False
+            
+            # Also check if we have room for more players overall
+            current_total = sum(len(players) for pos, players in self.roster_by_position.items())
+            max_total = sum(count for pos, count in self.roster_limits.items())
+            
+            return current_total < max_total
+        
+        # Handle special cases for bench and IR
         if position == "BE":
-            # Count total players on roster
-            total_players = sum(len(players) for players in self.roster_by_position.values())
-            max_roster_size = sum(count for pos, count in self.roster_limits.items() 
-                                if pos not in ["IR", "", "ER"])  # Exclude IR and empty positions
-            return total_players < max_roster_size
+            # Check if total roster size is below maximum
+            be_count = len(self.roster_by_position.get("BE", []))
+            max_be = self.roster_limits.get("BE", 0)
+            
+            if be_count >= max_be:
+                return False
+            
+            # Check if we have room for more players overall
+            current_total = sum(len(players) for pos, players in self.roster_by_position.items())
+            max_total = sum(count for pos, count in self.roster_limits.items() 
+                        if pos not in ["IR", ""])
+            
+            return current_total < max_total
         
-        # Handle FLEX positions (can be used for multiple positions)
-        if position == "RB/WR/TE":
-            # Check if we have space for any of RB, WR, or TE
-            return (self.can_draft_position("RB") or 
-                    self.can_draft_position("WR") or 
-                    self.can_draft_position("TE"))
+        if position == "IR":
+            # Check if IR spots are available
+            ir_count = len(self.roster_by_position.get("IR", []))
+            max_ir = self.roster_limits.get("IR", 0)
+            return ir_count < max_ir
+        
+        # Handle flexible position slots
+        if position in flexible_slots:
+            current_count = len(self.roster_by_position.get(position, []))
+            max_count = self.roster_limits.get(position, 0)
+            
+            # Check if this flexible slot is already full
+            if current_count >= max_count:
+                return False
+                
+            # For flexible slots, check if any eligible positions can still be drafted
+            for eligible_pos in flexible_slots[position]:
+                # For each eligible position, check if we need more players at that position
+                current_pos_count = len(self.roster_by_position.get(eligible_pos, []))
+                max_pos_count = self.roster_limits.get(eligible_pos, float('inf'))
+                
+                # If we have room for more of this position, it's valid
+                if current_pos_count < max_pos_count:
+                    # Also check if we have room for more players overall
+                    current_total = sum(len(players) for pos, players in self.roster_by_position.items())
+                    max_total = sum(count for pos, count in self.roster_limits.items() 
+                                if pos not in ["IR", ""])
                     
-        # Handle other positions normally
-        return current_count < max_count
-
+                    return current_total < max_total
+                    
+            # If all eligible positions are full, we can't draft for this slot
+            return False
+        
+        # For unknown positions, assume we can draft if we haven't met the overall roster limit
+        current_total = sum(len(players) for pos, players in self.roster_by_position.items())
+        max_total = sum(count for pos, count in self.roster_limits.items() 
+                    if pos not in ["IR", ""])
+        
+        return current_total < max_total
+    
     def get_position_needs(self) -> Dict[str, int]:
         """
         Get the number of players needed by position
@@ -285,9 +340,8 @@ class DraftSimulator:
     """Simulate a fantasy football draft with various strategies"""
     
     def __init__(self, players: List[Player], league_size: int = 10, 
-                roster_limits: Dict[str, int] = None, num_rounds: int = 16,
-                scoring_settings: Dict = None, user_pick: int = None,
-                rl_model = None):
+                roster_limits: Dict[str, int] = None, num_rounds: int = 18,
+                scoring_settings: Dict = None, user_pick: int = None, projection_models=None):
         """
         Initialize the draft simulator
         
@@ -305,8 +359,6 @@ class DraftSimulator:
             Scoring settings for the league
         user_pick : int, optional
             Draft position of the user (1-based, None for all AI)
-        rl_model : object, optional
-            Reinforcement learning model to use for RL strategy
         """
         self.players = players.copy()
         self.league_size = league_size
@@ -342,9 +394,6 @@ class DraftSimulator:
         else:
             self.scoring_settings = scoring_settings
         
-        # Store the RL model
-        self.rl_model = rl_model
-        
         # Initialize teams
         self.teams: List[Team] = []
         
@@ -358,6 +407,8 @@ class DraftSimulator:
         
         # Initialize the teams with different strategies
         self._initialize_teams()
+        
+        self.projection_models = projection_models or {}
     
     def _calculate_baselines(self) -> None:
         """
@@ -411,7 +462,7 @@ class DraftSimulator:
             "HeroRB",  # Hero RB Strategy
             "TwoRB",  # 2RB Strategy
             "BestAvailable",  # Simple best available
-            "RL"  # Reinforcement Learning
+            "PPO"  # PPO (Proximal Policy Optimization) Strategy - will be handled specially
         ]
         
         # Create teams
@@ -443,21 +494,31 @@ class DraftSimulator:
             
             self.teams.append(team)
     
-    def run_draft(self) -> Tuple[List[Team], List[Dict]]:
+    def run_draft(self, ppo_model=None) -> Tuple[List[Team], List[Dict]]:
         """
-        Run the draft simulation
+        Run the draft simulation with a proper snake draft order
         
+        Parameters:
+        -----------
+        ppo_model : PPODrafter, optional
+            PPO model to use for teams with PPO strategy
+            
         Returns:
         --------
         Tuple[List[Team], List[Dict]]
             List of teams after the draft and draft history
         """
         logger.info(f"Starting draft simulation with {self.league_size} teams and {self.num_rounds} rounds")
-        
         # Reset draft state
         self.current_round = 1
         self.current_pick = 1
         self.draft_history = []
+        
+        logger.info(f"Draft Simulator Details:")
+        logger.info(f"League Size: {self.league_size}")
+        
+        for team in self.teams:
+            logger.info(f"Team: {team.name}, Draft Position: {team.draft_position}, Strategy: {team.strategy}")
         
         # Reset all players' draft status
         for player in self.players:
@@ -471,22 +532,23 @@ class DraftSimulator:
             self.current_round = round_num
             logger.info(f"Starting Round {round_num}")
             
-            # Determine pick order (snake draft)
+            # Determine pick order (true snake draft)
             if round_num % 2 == 1:
-                # Odd rounds: 1 to N
+                # Odd rounds: 1 to N (ascending)
                 pick_order = list(range(self.league_size))
             else:
-                # Even rounds: N to 1
+                # Even rounds: N to 1 (descending)
                 pick_order = list(range(self.league_size - 1, -1, -1))
             
             # Make picks for this round
             for i, team_idx in enumerate(pick_order):
                 team = self.teams[team_idx]
-                overall_pick = (round_num - 1) * self.league_size + i + 1
+                overall_pick = (round_num - 1) * self.league_size + (team.draft_position if round_num % 2 == 1 else (self.league_size - team.draft_position + 1))
+
                 self.current_pick = overall_pick
-                
+                logger.info(f"Round {round_num}, Team: {team.name}, Draft Position: {team.draft_position}, Overall Pick: {overall_pick}")
                 # Make a pick
-                picked_player = self._make_pick(team, round_num, overall_pick)
+                picked_player = self._make_pick(team, round_num, overall_pick, ppo_model)
                 
                 if picked_player:
                     logger.info(f"Pick {overall_pick} (Round {round_num}.{i+1}): {team.name} selects {picked_player}")
@@ -520,9 +582,9 @@ class DraftSimulator:
         
         return self.teams, self.draft_history
     
-    def _make_pick(self, team: Team, round_num: int, overall_pick: int) -> Optional[Player]:
+    def _make_pick(self, team: Team, round_num: int, overall_pick: int, ppo_model=None) -> Optional[Player]:
         """
-        Make a draft pick for a team
+        Make a draft pick for a team with improved position limit validation
         
         Parameters:
         -----------
@@ -532,7 +594,9 @@ class DraftSimulator:
             Draft round
         overall_pick : int
             Overall pick number
-            
+        ppo_model : PPODrafter, optional
+            PPO model to use for PPO strategy
+                
         Returns:
         --------
         Optional[Player]
@@ -541,14 +605,65 @@ class DraftSimulator:
         # Get available players
         available_players = [p for p in self.players if not p.is_drafted]
         
-        # Get valid positions and valid players for detailed logging
+        # Get valid positions and valid players
         valid_positions = [pos for pos in self.roster_limits.keys() if team.can_draft_position(pos)]
-        valid_players = [p for p in available_players if p.position in valid_positions]
+        
+        # Determine valid player positions based on available roster slots
+        valid_player_positions = set()
+        
+        # Define mappings for different roster slots to actual player positions
+        slot_to_position_map = {
+            "QB": ["QB"],
+            "RB": ["RB"],
+            "WR": ["WR"],
+            "TE": ["TE"],
+            "K": ["K"],
+            "DST": ["DST"],
+            "FLEX": ["RB", "WR", "TE"],
+            "RB/WR": ["RB", "WR"],
+            "WR/TE": ["WR", "TE"],
+            "RB/WR/TE": ["RB", "WR", "TE"],
+            "OP": ["QB", "RB", "WR", "TE"],
+            "DL": ["DL", "DE", "DT"],
+            "LB": ["LB"],
+            "DB": ["DB", "CB", "S"],
+            "DP": ["DL", "DE", "DT", "LB", "DB", "CB", "S"],
+            "BE": ["QB", "RB", "WR", "TE", "K", "DST", "DL", "LB", "DB", "DE", "DT", "CB", "S"],
+            "IR": ["QB", "RB", "WR", "TE", "K", "DST", "DL", "LB", "DB", "DE", "DT", "CB", "S"]
+        }
+        
+        for slot in valid_positions:
+            if slot in slot_to_position_map:
+                valid_player_positions.update(slot_to_position_map[slot])
+            else:
+                # For any unrecognized slot type, assume it can hold any position
+                valid_player_positions.update(["QB", "RB", "WR", "TE", "K", "DST"])
+        
+        # Check current position counts against limits
+        position_counts = {
+            "QB": len(team.roster_by_position.get("QB", [])),
+            "RB": len(team.roster_by_position.get("RB", [])),
+            "WR": len(team.roster_by_position.get("WR", [])),
+            "TE": len(team.roster_by_position.get("TE", [])),
+            "K": len(team.roster_by_position.get("K", [])), 
+            "DST": len(team.roster_by_position.get("DST", []))
+        }
+        
+        # Remove positions that have reached their limits
+        for pos, count in position_counts.items():
+            if pos in self.roster_limits and count >= self.roster_limits.get(pos, 0):
+                if pos in valid_player_positions:
+                    valid_player_positions.remove(pos)
+        
+        # Filter to valid players
+        valid_players = [p for p in available_players if p.position in valid_player_positions]
         
         if not valid_players:
             logger.warning(f"Team {team.name} has no valid players to draft. Details:")
             logger.warning(f"  Valid positions: {valid_positions}")
+            logger.warning(f"  Valid player positions: {valid_player_positions}")
             logger.warning(f"  Current roster: {[(pos, len(team.roster_by_position[pos])) for pos in sorted(team.roster_by_position.keys()) if len(team.roster_by_position[pos]) > 0]}")
+            logger.warning(f"  Position counts: {position_counts}")
             logger.warning(f"  Available players by position: {[(pos, len([p for p in available_players if p.position == pos])) for pos in sorted(set([p.position for p in available_players]))]}")
             
             # Try to find a workaround - check if bench spots are available
@@ -566,37 +681,80 @@ class DraftSimulator:
         if team.strategy == "User" and self.user_pick is not None:
             # User team - would prompt for input in an interactive setting
             # For simulation purposes, default to VBD
-            player = self._pick_vbd(team, available_players)
+            player = self._pick_vbd(team, valid_players)
         
         elif team.strategy == "VBD":
-            player = self._pick_vbd(team, available_players)
+            player = self._pick_vbd(team, valid_players)
         
         elif team.strategy == "ESPN":
-            player = self._pick_espn(team, available_players)
+            player = self._pick_espn(team, valid_players)
         
         elif team.strategy == "ZeroRB":
-            player = self._pick_zero_rb(team, available_players, round_num)
+            player = self._pick_zero_rb(team, valid_players, round_num)
         
         elif team.strategy == "HeroRB":
-            player = self._pick_hero_rb(team, available_players, round_num)
+            player = self._pick_hero_rb(team, valid_players, round_num)
         
         elif team.strategy == "TwoRB":
-            player = self._pick_two_rb(team, available_players, round_num)
+            player = self._pick_two_rb(team, valid_players, round_num)
         
         elif team.strategy == "BestAvailable":
-            player = self._pick_best_available(team, available_players)
+            player = self._pick_best_available(team, valid_players)
         
-        elif team.strategy == "RL":
-            player = self._pick_rl(team, available_players, round_num, overall_pick)
-        
+        elif team.strategy == "PPO":
+            # Use PPO model if available
+            if ppo_model is not None:
+                try:
+                    # Import locally to avoid circular imports
+                    from src.models.ppo_drafter import DraftState
+                    
+                    # Create state with the already filtered valid players
+                    state = DraftState(
+                        team=team,
+                        available_players=valid_players,  # Use pre-filtered valid players
+                        round_num=round_num,
+                        overall_pick=overall_pick,
+                        league_size=self.league_size,
+                        roster_limits=self.roster_limits,
+                        max_rounds=self.num_rounds,
+                    )
+                    
+                    # Get action from PPO model
+                    action, _, _ = ppo_model.select_action(state, training=False)
+                    
+                    # Return the selected player if valid
+                    if action is not None and action < len(state.valid_players):
+                        return state.valid_players[action]
+                    
+                except ImportError as e:
+                    logger.warning(f"Couldn't import DraftState: {e}")
+                    logger.warning("Falling back to VBD strategy")
+                
+                # Fall back to VBD if model returns invalid action or DraftState import fails
+                player = self._pick_vbd(team, valid_players)
+            else:
+                # Fallback to VBD if no PPO model
+                logger.warning(f"No PPO model provided for team {team.name}, falling back to VBD")
+                player = self._pick_vbd(team, valid_players)
         else:
             # Default to VBD
-            player = self._pick_vbd(team, available_players)
+            player = self._pick_vbd(team, valid_players)
         
         # If strategy couldn't pick a player, try best available as fallback
         if not player and valid_players:
             logger.warning(f"Strategy {team.strategy} couldn't find a valid pick, falling back to best available.")
-            player = self._pick_best_available(team, available_players)
+            player = self._pick_best_available(team, valid_players)
+        
+        # Final validation check
+        if player and not team.can_draft_position(player.position):
+            logger.warning(f"Player {player.name} ({player.position}) selected by strategy {team.strategy} would violate position limits for team {team.name}")
+            # Find a player at a position we can draft
+            for pos in valid_positions:
+                pos_players = [p for p in valid_players if p.position == pos]
+                if pos_players:
+                    player = max(pos_players, key=lambda p: p.projected_points)
+                    logger.info(f"Replacing with {player.name} ({player.position})")
+                    break
         
         # Add player to team
         if player:
@@ -605,7 +763,6 @@ class DraftSimulator:
             logger.warning(f"Team {team.name} could not make a valid pick!")
         
         return player
-
 
     def _pick_vbd(self, team: Team, available_players: List[Player]) -> Optional[Player]:
         """
@@ -975,9 +1132,9 @@ class DraftSimulator:
         
         return valid_players[0]
     
-    def _pick_rl(self, team: Team, available_players: List[Player], round_num: int, overall_pick: int) -> Optional[Player]:
+    def _pick_ppo(self, team: Team, available_players: List[Player], round_num: int, overall_pick: int, ppo_model) -> Optional[Player]:
         """
-        Select a player using reinforcement learning strategy
+        Select a player using the PPO model
         
         Parameters:
         -----------
@@ -989,92 +1146,45 @@ class DraftSimulator:
             Current draft round
         overall_pick : int
             Overall pick number
+        ppo_model : PPODrafter
+            PPO model to use for selection
             
         Returns:
         --------
         Optional[Player]
             Selected player, or None if no valid pick
         """
-        # If no RL model is available, try to load the latest one
-        if getattr(self, 'rl_model', None) is None:
-            # Model paths to check, in order of preference
-            model_paths = [
-                os.path.join('data/models', 'rl_drafter_final'),
-                os.path.join('data/models', 'rl_models', 'rl_drafter_final')
-            ]
-            
-            # Also check for episode-specific models
-            models_dir = os.path.join('data/models', 'rl_models')
-            if os.path.exists(models_dir):
-                # Find the highest episode number
-                episode_files = [f for f in os.listdir(models_dir) if f.startswith('rl_drafter_episode_') and (f.endswith('.keras') or f.endswith('.pkl'))]
-                if episode_files:
-                    # Sort by episode number
-                    episode_files.sort(key=lambda f: int(f.split('_')[-1].split('.')[0]), reverse=True)
-                    # Add the latest episode model to the list
-                    model_paths.insert(0, os.path.join(models_dir, episode_files[0].split('.')[0]))
-            
-            # Also check for initial model
-            initial_model_path = os.path.join('data/models', 'rl_models', 'rl_drafter_initial')
-            model_paths.append(initial_model_path)
-            
-            # Try each path
-            for model_path in model_paths:
-                if (os.path.exists(model_path + ".keras") or os.path.exists(model_path + ".pkl")):
-                    try:
-                        from .rl_drafter import RLDrafter
-                        self.rl_model = RLDrafter.load_model(model_path)
-                        logger.info(f"Loaded RL model from {model_path}")
-                        break
-                    except Exception as e:
-                        logger.warning(f"Failed to load RL model from {model_path}: {e}")
+        # Import DraftState to avoid circular imports
+        from src.models.ppo_drafter import DraftState
         
-        # Use the injected RL model if available
-        if hasattr(self, 'rl_model') and self.rl_model is not None:
-            # Filter to positions we need
-            valid_positions = [pos for pos in self.roster_limits.keys() if team.can_draft_position(pos)]
-            valid_players = [p for p in available_players if p.position in valid_positions]
-            
-            if not valid_players:
-                return None
-                
-            # Create state representation
-            from .rl_drafter import DraftState
-            state = DraftState(
-                team=team,
-                available_players=available_players,
-                round_num=round_num,
-                overall_pick=overall_pick,
-                league_size=self.league_size,
-                roster_limits=self.roster_limits,
-                max_rounds=self.num_rounds
-            )
-            
-            # Get action from RL model
-            action = self.rl_model.select_action(state, training=False)
-            
-            # Return the selected player
-            if action is not None and action < len(state.valid_players):
-                return state.valid_players[action]
-        
-        # Fallback strategy if RL model not available or returns invalid action
-        # Use VBD with some randomness for exploration
+        # Filter to positions we need
         valid_positions = [pos for pos in self.roster_limits.keys() if team.can_draft_position(pos)]
         valid_players = [p for p in available_players if p.position in valid_positions]
         
         if not valid_players:
             return None
+            
+        # Create a state for the PPO model
+        state = DraftState(
+            team=team,
+            available_players=available_players,
+            round_num=round_num,
+            overall_pick=overall_pick,
+            league_size=self.league_size,
+            roster_limits=self.roster_limits,
+            max_rounds=self.num_rounds,
+        )
         
-        # Sort by VBD with some randomness
-        for player in valid_players:
-            exploration_noise = random.gauss(0, 0.1) * player.projected_points
-            player.rl_score = (getattr(player, 'vbd', player.projected_points) + exploration_noise)
+        # Get action from PPO model
+        action, _, _ = ppo_model.select_action(state, training=False)
         
-        valid_players.sort(key=lambda p: getattr(p, 'rl_score', 0), reverse=True)
+        # Return the selected player if valid
+        if action is not None and action < len(state.valid_players):
+            return state.valid_players[action]
         
-        # Take top 3 and pick randomly to encourage exploration
-        top_players = valid_players[:min(3, len(valid_players))]
-        return random.choice(top_players)
+        # Fall back to VBD if model returns invalid action
+        logger.warning(f"PPO model returned invalid action: {action}, falling back to VBD")
+        return self._pick_vbd(team, available_players)
     
     def create_draft_report(self, output_path: str = None) -> pd.DataFrame:
         """
@@ -1126,6 +1236,7 @@ class DraftSimulator:
         
         return df, team_df
     
+    @staticmethod
     def load_players_from_projections(projections: Dict[str, pd.DataFrame], vbd_baseline: Dict = None) -> List[Player]:
         """
         Load players from projection DataFrames
@@ -1185,7 +1296,7 @@ class DraftSimulator:
                     **{k: v for k, v in row.items() if k not in ["name", "position", "team", "projected_points", 
                                                                 "projection_low", "projection_high", 
                                                                 "ceiling_projection", "tier"]}
-)
+                )
                 
                 # Calculate VBD if baseline provided
                 if vbd_baseline and position in vbd_baseline:

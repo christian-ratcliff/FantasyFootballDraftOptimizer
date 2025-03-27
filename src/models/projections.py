@@ -7,6 +7,7 @@ import joblib
 import os
 from datetime import datetime
 
+
 # Setup logging
 logger = logging.getLogger(__name__)
 
@@ -698,3 +699,105 @@ class PlayerProjectionModel:
         
         return instance
 
+
+
+
+class ProjectionModelLoader:
+    """
+    Centralized loader for projection models to avoid repeated disk reads
+    """
+    def __init__(self, models_dir='data/models'):
+        """
+        Initialize and load all projection models
+        
+        Parameters:
+        -----------
+        models_dir : str
+            Directory containing joblib model files
+        """
+        self.models_dir = models_dir
+        self.models = self._load_all_models()
+    
+    def _load_all_models(self):
+        """
+        Load projection models for all positions
+        
+        Returns:
+        --------
+        dict
+            Dictionary of loaded projection models by position
+        """
+        projection_models = {}
+        positions = ['qb', 'rb', 'wr', 'te']
+        
+        for position in positions:
+            model_path = os.path.join(self.models_dir, f'{position}_model.joblib')
+            try:
+                model_data = joblib.load(model_path)
+                projection_models[position] = model_data
+                logger.info(f"Loaded projection model for {position}")
+                
+                # Log model details
+                self._log_model_details(position, model_data)
+                
+            except Exception as e:
+                logger.warning(f"Could not load {position} projection model: {e}")
+        
+        return projection_models
+    
+    def _log_model_details(self, position, model_data):
+        """
+        Log detailed information about the loaded model
+        
+        Parameters:
+        -----------
+        position : str
+            Player position
+        model_data : dict
+            Loaded model data
+        """
+        logger.info(f"\n=== {position.upper()} Projection Model Details ===")
+        
+        # Model type
+        logger.info(f"Model Type: {model_data.get('model_type', 'Unknown')}")
+        
+        # Training samples
+        logger.info(f"Training Samples: {model_data.get('training_samples', 'N/A')}")
+        
+        # Features
+        features = model_data.get('features', [])
+        logger.info(f"Number of Features: {len(features)}")
+        
+        # Validation Metrics
+        metrics = model_data.get('validation_metrics', {})
+        if metrics:
+            logger.info("Validation Metrics:")
+            for metric, value in metrics.items():
+                if isinstance(value, (int, float)):
+                    logger.info(f"  {metric}: {value:.4f}")
+        
+        # Feature Importances
+        feature_importances = model_data.get('feature_importances')
+        if feature_importances is not None:
+            logger.info("\nTop 5 Most Important Features:")
+            top_features = feature_importances.head(5)
+            for _, row in top_features.iterrows():
+                logger.info(f"  {row['feature']}: {row['importance']:.4f}")
+        
+        logger.info("=" * 50)
+    
+    def get_model(self, position):
+        """
+        Retrieve a specific position's model
+        
+        Parameters:
+        -----------
+        position : str
+            Player position (lowercase)
+        
+        Returns:
+        --------
+        dict or None
+            Loaded model data for the position
+        """
+        return self.models.get(position.lower())

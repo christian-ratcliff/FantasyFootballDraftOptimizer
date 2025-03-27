@@ -13,7 +13,7 @@ from espn_api.football import League
 
 def generate_config(league_id, year, espn_s2=None, swid=None, output_path=None):
     """
-    Generate a config file by connecting to ESPN API and extracting league settings
+    Generate a comprehensive config file by connecting to ESPN API and extracting all league settings
     
     Parameters:
     -----------
@@ -42,15 +42,40 @@ def generate_config(league_id, year, espn_s2=None, swid=None, output_path=None):
         # Extract relevant league settings
         settings = league.settings
         
-        # Extract scoring settings
+        # Extract scoring settings - get EVERYTHING
         scoring_dict = {}
         for item in settings.scoring_format:
             scoring_dict[item['abbr']] = item['points']
         
+        # Calculate bench spots
+        total_roster_size = 18  # Total roster size
+        bench_spots = total_roster_size - 10
         # Extract roster settings
-        roster_dict = settings.position_slot_counts
+        roster_dict = {
+            "QB": 3,  # Maximum 3 QBs
+            "RB": 10,  # Effectively unlimited
+            "WR": 10,  # Effectively unlimited
+            "TE": 2,  # Effectively unlimited
+            "BE": bench_spots,  # Calculated bench spots
+            "IR": 1    # One IR spot
+        }
         
-        # Build config object
+        # Get draft details including draft type, time per pick, etc.
+        draft_settings = {
+            "keeper_count": settings.keeper_count,
+            "draft_order": [],
+            "draft_type": "snake"  # default, would need to get actual value from API
+        }
+        
+        # Try to get draft order if draft has occurred
+        if hasattr(league, 'draft') and league.draft:
+            draft_order = []
+            for pick in league.draft:
+                if pick.round_num == 1:
+                    draft_order.append(pick.team.team_id)
+            draft_settings["draft_order"] = draft_order
+        
+        # Build config object with comprehensive settings
         config = {
             "league_id": league_id,
             "year": year,
@@ -59,11 +84,121 @@ def generate_config(league_id, year, espn_s2=None, swid=None, output_path=None):
             "league_info": {
                 "name": settings.name,
                 "team_count": settings.team_count,
-                "playoff_teams": settings.playoff_team_count
+                "playoff_teams": settings.playoff_team_count,
+                "nfl_games_per_player": 17,  # Set to current NFL season length
+                "current_matchup_period": league.currentMatchupPeriod,
+                "current_scoring_period": league.scoringPeriodId,
+                "first_scoring_period": league.firstScoringPeriod,
+                "final_scoring_period": league.finalScoringPeriod,
+                "current_week": league.current_week
+            },
+            "schedule_settings": {
+                "regular_season_weeks": settings.reg_season_count,
+                "matchup_periods": settings.matchup_periods,
+                "playoff_matchup_period_length": settings.playoff_matchup_period_length,
+                "playoff_seed_tie_rule": settings.playoff_seed_tie_rule
+            },
+            "trade_settings": {
+                "deadline": settings.trade_deadline,
+                "veto_votes_required": settings.veto_votes_required
+            },
+            "acquisition_settings": {
+                "faab_enabled": settings.faab,
+                "acquisition_budget": settings.acquisition_budget
+            },
+            "draft_settings": draft_settings,
+            "division_settings": {
+                "division_map": settings.division_map
+            },
+            "tiebreaker_settings": {
+                "regular_season_tiebreaker": settings.tie_rule,
+                "playoff_tiebreaker": settings.playoff_tie_rule
             },
             "scoring_settings": scoring_dict,
-            "roster_settings": roster_dict
+            "roster_settings": roster_dict,
+            "scoring_type": settings.scoring_type
         }
+        
+        # Extract starter limits for simulation
+        # First try to determine from actual settings, then fall back to reasonable defaults
+        starter_limits = settings.position_slot_counts
+        
+        # # Standard positions
+        # for pos in ["QB", "RB", "WR", "TE", "D/ST", "K", "FLEX"]:
+        #     if pos in roster_dict:
+        #         starter_limits[pos] = roster_dict[pos]
+        
+        # # Handle special FLEX spots
+        # for flex_pos in ["RB/WR", "WR/TE", "RB/WR/TE", "OP"]:
+        #     if flex_pos in roster_dict:
+        #         starter_limits[flex_pos] = roster_dict[flex_pos]
+        
+        # # Handle defensive positions for IDP leagues
+        # for def_pos in ["DL", "LB", "DB", "DE", "DT", "CB", "S", "DP"]:
+        #     if def_pos in roster_dict:
+        #         starter_limits[def_pos] = roster_dict[def_pos]
+        
+        # Add starter limits to config
+        config["starter_limits"] = starter_limits
+        
+        # Add bench and IR spots
+        if "BE" in roster_dict:
+            config["bench_spots"] = roster_dict["BE"]
+        if "IR" in roster_dict:
+            config["ir_spots"] = roster_dict["IR"]
+        
+        # Add additional team data for simulation and GUI
+        team_data = []
+        for team in league.teams:
+            team_info = {
+                "team_id": team.team_id,
+                "team_abbrev": team.team_abbrev,
+                "team_name": team.team_name,
+                "owner_name": team.owners[0] if team.owners else None,
+                "division_id": team.division_id,
+                "division_name": team.division_name,
+                "wins": team.wins,
+                "losses": team.losses,
+                "ties": team.ties,
+                "points_for": team.points_for,
+                "points_against": team.points_against,
+                "acquisition_budget_spent": team.acquisition_budget_spent,
+                "waiver_rank": team.waiver_rank,
+                "standing": team.standing,
+                "logo_url": team.logo_url
+            }
+            team_data.append(team_info)
+        
+        config["teams"] = team_data
+        
+        # Create a player map to help with draft assistant
+        player_map = {}
+        if hasattr(league, 'player_map'):
+            # Convert player map to a more usable format
+            for player_id, player_name in league.player_map.items():
+                if isinstance(player_id, int):  # Only take ID -> name mappings
+                    player_map[str(player_id)] = player_name
+        
+        config["player_map"] = player_map
+        
+        # Get schedule information
+        schedule_data = []
+        try:
+            matchups = league.scoreboard()
+            for matchup in matchups:
+                if hasattr(matchup, 'home_team') and hasattr(matchup, 'away_team'):
+                    schedule_data.append({
+                        'home_team_id': matchup.home_team.team_id if matchup.home_team else None,
+                        'away_team_id': matchup.away_team.team_id if matchup.away_team else None,
+                        'home_score': matchup.home_score,
+                        'away_score': matchup.away_score,
+                        'matchup_type': matchup.matchup_type,
+                        'is_playoff': matchup.is_playoff
+                    })
+        except Exception as e:
+            print(f"Error fetching schedule: {e}")
+        
+        config["current_schedule"] = schedule_data
         
         # Set default output path if not provided
         if output_path is None:
@@ -90,7 +225,8 @@ def generate_config(league_id, year, espn_s2=None, swid=None, output_path=None):
         print("3. ESPN API changes or rate limiting")
         
         return False
-
+    
+    
 def get_espn_cookies():
     """
     Guide the user through getting ESPN cookies for private leagues

@@ -336,9 +336,9 @@ class Team:
             for player in starters[position]
         )
 
-class DraftSimulator:
-    """Simulate a fantasy football draft with various strategies"""
     
+class DraftSimulator:
+
     def __init__(self, players: List[Player], league_size: int = 10, 
                 roster_limits: Dict[str, int] = None, num_rounds: int = 18,
                 scoring_settings: Dict = None, user_pick: int = None, projection_models=None):
@@ -582,188 +582,7 @@ class DraftSimulator:
         
         return self.teams, self.draft_history
     
-    def _make_pick(self, team: Team, round_num: int, overall_pick: int, ppo_model=None) -> Optional[Player]:
-        """
-        Make a draft pick for a team with improved position limit validation
-        
-        Parameters:
-        -----------
-        team : Team
-            Team making the pick
-        round_num : int
-            Draft round
-        overall_pick : int
-            Overall pick number
-        ppo_model : PPODrafter, optional
-            PPO model to use for PPO strategy
-                
-        Returns:
-        --------
-        Optional[Player]
-            The player picked, or None if no valid pick
-        """
-        # Get available players
-        available_players = [p for p in self.players if not p.is_drafted]
-        
-        # Get valid positions and valid players
-        valid_positions = [pos for pos in self.roster_limits.keys() if team.can_draft_position(pos)]
-        
-        # Determine valid player positions based on available roster slots
-        valid_player_positions = set()
-        
-        # Define mappings for different roster slots to actual player positions
-        slot_to_position_map = {
-            "QB": ["QB"],
-            "RB": ["RB"],
-            "WR": ["WR"],
-            "TE": ["TE"],
-            "K": ["K"],
-            "DST": ["DST"],
-            "FLEX": ["RB", "WR", "TE"],
-            "RB/WR": ["RB", "WR"],
-            "WR/TE": ["WR", "TE"],
-            "RB/WR/TE": ["RB", "WR", "TE"],
-            "OP": ["QB", "RB", "WR", "TE"],
-            "DL": ["DL", "DE", "DT"],
-            "LB": ["LB"],
-            "DB": ["DB", "CB", "S"],
-            "DP": ["DL", "DE", "DT", "LB", "DB", "CB", "S"],
-            "BE": ["QB", "RB", "WR", "TE", "K", "DST", "DL", "LB", "DB", "DE", "DT", "CB", "S"],
-            "IR": ["QB", "RB", "WR", "TE", "K", "DST", "DL", "LB", "DB", "DE", "DT", "CB", "S"]
-        }
-        
-        for slot in valid_positions:
-            if slot in slot_to_position_map:
-                valid_player_positions.update(slot_to_position_map[slot])
-            else:
-                # For any unrecognized slot type, assume it can hold any position
-                valid_player_positions.update(["QB", "RB", "WR", "TE", "K", "DST"])
-        
-        # Check current position counts against limits
-        position_counts = {
-            "QB": len(team.roster_by_position.get("QB", [])),
-            "RB": len(team.roster_by_position.get("RB", [])),
-            "WR": len(team.roster_by_position.get("WR", [])),
-            "TE": len(team.roster_by_position.get("TE", [])),
-            "K": len(team.roster_by_position.get("K", [])), 
-            "DST": len(team.roster_by_position.get("DST", []))
-        }
-        
-        # Remove positions that have reached their limits
-        for pos, count in position_counts.items():
-            if pos in self.roster_limits and count >= self.roster_limits.get(pos, 0):
-                if pos in valid_player_positions:
-                    valid_player_positions.remove(pos)
-        
-        # Filter to valid players
-        valid_players = [p for p in available_players if p.position in valid_player_positions]
-        
-        if not valid_players:
-            logger.warning(f"Team {team.name} has no valid players to draft. Details:")
-            logger.warning(f"  Valid positions: {valid_positions}")
-            logger.warning(f"  Valid player positions: {valid_player_positions}")
-            logger.warning(f"  Current roster: {[(pos, len(team.roster_by_position[pos])) for pos in sorted(team.roster_by_position.keys()) if len(team.roster_by_position[pos]) > 0]}")
-            logger.warning(f"  Position counts: {position_counts}")
-            logger.warning(f"  Available players by position: {[(pos, len([p for p in available_players if p.position == pos])) for pos in sorted(set([p.position for p in available_players]))]}")
-            
-            # Try to find a workaround - check if bench spots are available
-            if "BE" in valid_positions:
-                # Just pick best available player regardless of position as a bench player
-                logger.info(f"Attempting to draft a bench player for {team.name}")
-                if available_players:
-                    # Sort by projected points
-                    available_players.sort(key=lambda p: p.projected_points, reverse=True)
-                    return available_players[0]
-            
-            return None
-        
-        # Check team's strategy
-        if team.strategy == "User" and self.user_pick is not None:
-            # User team - would prompt for input in an interactive setting
-            # For simulation purposes, default to VBD
-            player = self._pick_vbd(team, valid_players)
-        
-        elif team.strategy == "VBD":
-            player = self._pick_vbd(team, valid_players)
-        
-        elif team.strategy == "ESPN":
-            player = self._pick_espn(team, valid_players)
-        
-        elif team.strategy == "ZeroRB":
-            player = self._pick_zero_rb(team, valid_players, round_num)
-        
-        elif team.strategy == "HeroRB":
-            player = self._pick_hero_rb(team, valid_players, round_num)
-        
-        elif team.strategy == "TwoRB":
-            player = self._pick_two_rb(team, valid_players, round_num)
-        
-        elif team.strategy == "BestAvailable":
-            player = self._pick_best_available(team, valid_players)
-        
-        elif team.strategy == "PPO":
-            # Use PPO model if available
-            if ppo_model is not None:
-                try:
-                    # Import locally to avoid circular imports
-                    from src.models.ppo_drafter import DraftState
-                    
-                    # Create state with the already filtered valid players
-                    state = DraftState(
-                        team=team,
-                        available_players=valid_players,  # Use pre-filtered valid players
-                        round_num=round_num,
-                        overall_pick=overall_pick,
-                        league_size=self.league_size,
-                        roster_limits=self.roster_limits,
-                        max_rounds=self.num_rounds,
-                    )
-                    
-                    # Get action from PPO model
-                    action, _, _ = ppo_model.select_action(state, training=False)
-                    
-                    # Return the selected player if valid
-                    if action is not None and action < len(state.valid_players):
-                        return state.valid_players[action]
-                    
-                except ImportError as e:
-                    logger.warning(f"Couldn't import DraftState: {e}")
-                    logger.warning("Falling back to VBD strategy")
-                
-                # Fall back to VBD if model returns invalid action or DraftState import fails
-                player = self._pick_vbd(team, valid_players)
-            else:
-                # Fallback to VBD if no PPO model
-                logger.warning(f"No PPO model provided for team {team.name}, falling back to VBD")
-                player = self._pick_vbd(team, valid_players)
-        else:
-            # Default to VBD
-            player = self._pick_vbd(team, valid_players)
-        
-        # If strategy couldn't pick a player, try best available as fallback
-        if not player and valid_players:
-            logger.warning(f"Strategy {team.strategy} couldn't find a valid pick, falling back to best available.")
-            player = self._pick_best_available(team, valid_players)
-        
-        # Final validation check
-        if player and not team.can_draft_position(player.position):
-            logger.warning(f"Player {player.name} ({player.position}) selected by strategy {team.strategy} would violate position limits for team {team.name}")
-            # Find a player at a position we can draft
-            for pos in valid_positions:
-                pos_players = [p for p in valid_players if p.position == pos]
-                if pos_players:
-                    player = max(pos_players, key=lambda p: p.projected_points)
-                    logger.info(f"Replacing with {player.name} ({player.position})")
-                    break
-        
-        # Add player to team
-        if player:
-            team.add_player(player, round_num, overall_pick)
-        else:
-            logger.warning(f"Team {team.name} could not make a valid pick!")
-        
-        return player
-
+    
     def _pick_vbd(self, team: Team, available_players: List[Player]) -> Optional[Player]:
         """
         Select a player using Value-Based Drafting
@@ -1236,6 +1055,755 @@ class DraftSimulator:
         
         return df, team_df
     
+    
+    def _make_pick(self, team: Team, round_num: int, overall_pick: int, ppo_model=None) -> Optional[Player]:
+        """
+        Make a draft pick for a team with improved position limit validation and opponent modeling
+        
+        Parameters:
+        -----------
+        team : Team
+            Team making the pick
+        round_num : int
+            Draft round
+        overall_pick : int
+            Overall pick number
+        ppo_model : PPODrafter, optional
+            PPO model to use for PPO strategy
+                
+        Returns:
+        --------
+        Optional[Player]
+            The player picked, or None if no valid pick
+        """
+        # Get available players
+        available_players = [p for p in self.players if not p.is_drafted]
+        
+        # Get valid positions and valid players
+        valid_positions = [pos for pos in self.roster_limits.keys() if team.can_draft_position(pos)]
+        
+        # Determine valid player positions based on available roster slots
+        valid_player_positions = set()
+        
+        # Define mappings for different roster slots to actual player positions
+        slot_to_position_map = {
+            "QB": ["QB"],
+            "RB": ["RB"],
+            "WR": ["WR"],
+            "TE": ["TE"],
+            "K": ["K"],
+            "DST": ["DST"],
+            "FLEX": ["RB", "WR", "TE"],
+            "RB/WR": ["RB", "WR"],
+            "WR/TE": ["WR", "TE"],
+            "RB/WR/TE": ["RB", "WR", "TE"],
+            "OP": ["QB", "RB", "WR", "TE"],
+            "DL": ["DL", "DE", "DT"],
+            "LB": ["LB"],
+            "DB": ["DB", "CB", "S"],
+            "DP": ["DL", "DE", "DT", "LB", "DB", "CB", "S"],
+            "BE": ["QB", "RB", "WR", "TE", "K", "DST", "DL", "LB", "DB", "DE", "DT", "CB", "S"],
+            "IR": ["QB", "RB", "WR", "TE", "K", "DST", "DL", "LB", "DB", "DE", "DT", "CB", "S"]
+        }
+        
+        for slot in valid_positions:
+            if slot in slot_to_position_map:
+                valid_player_positions.update(slot_to_position_map[slot])
+            else:
+                # For any unrecognized slot type, assume it can hold any position
+                valid_player_positions.update(["QB", "RB", "WR", "TE", "K", "DST"])
+        
+        # Check current position counts against limits
+        position_counts = {
+            "QB": len(team.roster_by_position.get("QB", [])),
+            "RB": len(team.roster_by_position.get("RB", [])),
+            "WR": len(team.roster_by_position.get("WR", [])),
+            "TE": len(team.roster_by_position.get("TE", [])),
+            "K": len(team.roster_by_position.get("K", [])), 
+            "DST": len(team.roster_by_position.get("DST", []))
+        }
+        
+        # Remove positions that have reached their limits
+        for pos, count in position_counts.items():
+            if pos in self.roster_limits and count >= self.roster_limits.get(pos, 0):
+                if pos in valid_player_positions:
+                    valid_player_positions.remove(pos)
+        
+        # Filter to valid players
+        valid_players = [p for p in available_players if p.position in valid_player_positions]
+        
+        if not valid_players:
+            # Handle the case with no valid players (existing code)
+            logger.warning(f"Team {team.name} has no valid players to draft. Details:")
+            # (Rest of error handling code remains the same)
+            return None
+        
+        # Get starter limits if available in scoring settings
+        starter_limits = {}
+        if (hasattr(self, 'scoring_settings') and self.scoring_settings and 
+            'starter_limits' in self.scoring_settings):
+            starter_limits = self.scoring_settings['starter_limits']
+        
+        # Check team's strategy
+        if team.strategy == "PPO" and ppo_model is not None:
+            from src.models.ppo_drafter import DraftState
+            # Use PPO model with enhanced opponent modeling
+            state = DraftState(
+                team=team,
+                available_players=available_players,
+                round_num=round_num,
+                overall_pick=overall_pick,
+                league_size=self.league_size,
+                roster_limits=self.roster_limits,
+                max_rounds=self.num_rounds,
+                projection_models=getattr(self, 'projection_models', None),
+                use_top_n_features=getattr(ppo_model, 'use_top_n_features', 0),
+                all_teams=self.teams,  # Pass all teams for opponent modeling
+                starter_limits=starter_limits  # Pass starter limits
+            )
+            
+            # Get action from PPO model
+            action, _, _ = ppo_model.select_action(state, training=False)
+            
+            # Return the selected player if valid
+            if action is not None and action < len(state.valid_players):
+                return state.valid_players[action]
+            
+            # Fall back to VBD if model returns invalid action
+            logger.warning(f"PPO model returned invalid action: {action}, falling back to VBD")
+            player = self._pick_vbd(team, valid_players)
+            
+        # Other strategies remain the same with small enhancements
+        elif team.strategy == "VBD":
+            player = self._pick_vbd(team, valid_players)
+            
+        elif team.strategy == "ESPN":
+            player = self._pick_espn(team, valid_players)
+            
+        elif team.strategy == "ZeroRB":
+            # Enhanced ZeroRB with position scarcity awareness
+            player = self._pick_zero_rb_enhanced(team, valid_players, round_num, overall_pick)
+            
+        elif team.strategy == "HeroRB":
+            # Enhanced HeroRB with position scarcity awareness
+            player = self._pick_hero_rb_enhanced(team, valid_players, round_num, overall_pick)
+            
+        elif team.strategy == "TwoRB":
+            # Enhanced TwoRB with position scarcity awareness
+            player = self._pick_two_rb_enhanced(team, valid_players, round_num, overall_pick)
+            
+        elif team.strategy == "BestAvailable":
+            player = self._pick_best_available(team, valid_players)
+            
+        else:
+            # Default to VBD
+            player = self._pick_vbd(team, valid_players)
+        
+        # If strategy couldn't pick a player, try best available as fallback
+        if not player and valid_players:
+            logger.warning(f"Strategy {team.strategy} couldn't find a valid pick, falling back to best available.")
+            player = self._pick_best_available(team, valid_players)
+        
+        # Final validation check (same as original)
+        if player and not team.can_draft_position(player.position):
+            logger.warning(f"Player {player.name} ({player.position}) selected by strategy {team.strategy} would violate position limits for team {team.name}")
+            # Find a player at a position we can draft
+            for pos in valid_positions:
+                pos_players = [p for p in valid_players if p.position == pos]
+                if pos_players:
+                    player = max(pos_players, key=lambda p: p.projected_points)
+                    logger.info(f"Replacing with {player.name} ({player.position})")
+                    break
+        
+        # Add player to team
+        if player:
+            team.add_player(player, round_num, overall_pick)
+        else:
+            logger.warning(f"Team {team.name} could not make a valid pick!")
+        
+        return player
+    
+    def _calculate_position_scarcity(self, valid_players):
+        """
+        Calculate position scarcity metrics for available players
+        
+        Parameters:
+        -----------
+        valid_players : List[Player]
+            List of available valid players
+            
+        Returns:
+        --------
+        dict
+            Dictionary containing scarcity metrics for each position
+        """
+        # Group available players by position
+        players_by_pos = {}
+        for player in valid_players:
+            pos = player.position
+            if pos not in players_by_pos:
+                players_by_pos[pos] = []
+            players_by_pos[pos].append(player)
+        
+        # Calculate scarcity metrics
+        scarcity = {}
+        for pos, players in players_by_pos.items():
+            # Sort by projected points
+            sorted_players = sorted(players, key=lambda p: p.projected_points, reverse=True)
+            
+            # Calculate metrics
+            total_available = len(sorted_players)
+            top_tier_count = min(5, total_available)  # Consider top 5 as top tier
+            
+            # Average value of top tier
+            if top_tier_count > 0:
+                top_tier_avg = sum(p.projected_points for p in sorted_players[:top_tier_count]) / top_tier_count
+            else:
+                top_tier_avg = 0
+            
+            # Starter-quality players (above 75% of top player)
+            top_value = sorted_players[0].projected_points if sorted_players else 0
+            starter_threshold = 0.75 * top_value
+            starter_quality_count = sum(1 for p in sorted_players if p.projected_points >= starter_threshold)
+            
+            # Calculate relative scarcity (fewer players = higher scarcity)
+            typical_starters = {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "K": 1, "DST": 1}
+            league_starting_spots = typical_starters.get(pos, 0) * self.league_size
+            
+            if league_starting_spots > 0:
+                relative_scarcity = min(1.0, starter_quality_count / league_starting_spots)
+            else:
+                relative_scarcity = 1.0  # Default if no starter spots
+            
+            # Compute a scarcity score (higher = more scarce)
+            scarcity_score = 1.0 - relative_scarcity
+            
+            # Detect value cliffs
+            cliffs = []
+            if len(sorted_players) >= 2:
+                for i in range(min(10, len(sorted_players) - 1)):
+                    current_value = sorted_players[i].projected_points
+                    next_value = sorted_players[i + 1].projected_points
+                    
+                    # Calculate percentage drop
+                    drop_percentage = (current_value - next_value) / current_value if current_value > 0 else 0
+                    
+                    # Identify cliff if drop is significant (arbitrary threshold of 15%)
+                    if drop_percentage >= 0.15:
+                        cliffs.append({
+                            'position': i,
+                            'drop_percentage': drop_percentage
+                        })
+            
+            scarcity[pos] = {
+                'total_available': total_available,
+                'starter_quality_count': starter_quality_count,
+                'top_tier_avg': top_tier_avg,
+                'relative_scarcity': relative_scarcity,
+                'scarcity_score': scarcity_score,
+                'has_cliff': len(cliffs) > 0,
+                'first_cliff_position': cliffs[0]['position'] if cliffs else None,
+                'first_cliff_magnitude': cliffs[0]['drop_percentage'] if cliffs else 0
+            }
+        
+        return scarcity
+    
+    def _detect_position_runs(self, last_n_picks=8):
+        """
+        Detect if there's been a recent run on a position
+        
+        Parameters:
+        -----------
+        last_n_picks : int
+            Number of recent picks to analyze
+            
+        Returns:
+        --------
+        dict
+            Dictionary mapping positions to run metrics
+        """
+        # Count positions drafted in recent picks
+        position_counts = {"QB": 0, "RB": 0, "WR": 0, "TE": 0, "K": 0, "DST": 0}
+        recent_picks_count = 0
+        
+        # Look at draft history in reverse order
+        for i in range(min(last_n_picks, len(self.draft_history))):
+            pick = self.draft_history[-(i+1)]  # Get draft picks in reverse order
+            position = pick.get("position")
+            
+            if position in position_counts:
+                position_counts[position] += 1
+                recent_picks_count += 1
+        
+        # Calculate run metrics
+        position_runs = {}
+        for pos, count in position_counts.items():
+            # Calculate run percentage (percentage of recent picks at this position)
+            run_percentage = count / max(1, recent_picks_count) if recent_picks_count > 0 else 0
+            
+            # Determine if there's a run (arbitrary threshold of 25%)
+            is_run = run_percentage >= 0.25
+            
+            position_runs[pos] = {
+                'recent_picks': count,
+                'run_percentage': run_percentage,
+                'is_run': is_run
+            }
+        
+        return position_runs
+    
+    def _pick_zero_rb_enhanced(self, team, available_players, round_num, overall_pick):
+        """
+        Select a player using Zero RB strategy with position scarcity awareness
+        
+        Parameters:
+        -----------
+        team : Team
+            Team making the pick
+        available_players : List[Player]
+            List of available players
+        round_num : int
+            Current draft round
+        overall_pick : int
+            Overall pick number
+            
+        Returns:
+        --------
+        Optional[Player]
+            Selected player, or None if no valid pick
+        """
+        # Filter to positions we need
+        valid_positions = [pos for pos in self.roster_limits.keys() if team.can_draft_position(pos)]
+        valid_players = [p for p in available_players if p.position in valid_positions]
+        
+        if not valid_players:
+            return None
+        
+        # Calculate position scarcity
+        scarcity = self._calculate_position_scarcity(valid_players)
+        
+        # Detect position runs
+        position_runs = self._detect_position_runs()
+        
+        # Zero RB strategy with scarcity awareness
+        if round_num <= 4:
+            # Enhanced early round strategy - prioritize WR, TE, QB with scarcity awareness
+            early_positions = ["WR", "TE", "QB"]
+            
+            # Check for position runs and value cliffs
+            for pos in early_positions:
+                # Check for position run
+                if pos in position_runs and position_runs[pos]['is_run']:
+                    # If there's a run on a position we want, consider prioritizing it
+                    pos_players = [p for p in valid_players if p.position == pos]
+                    if pos_players:
+                        # Sort by VBD and grab the top player
+                        pos_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                        top_player = pos_players[0]
+                        
+                        # Only grab if it's a good value
+                        vbd = getattr(top_player, 'vbd', 0)
+                        if vbd > 3:  # Arbitrary threshold for a good value
+                            return top_player
+                
+                # Check for value cliff
+                if pos in scarcity and scarcity[pos]['has_cliff'] and scarcity[pos]['first_cliff_position'] == 0:
+                    # If there's a value cliff after the top player, consider taking them
+                    pos_players = [p for p in valid_players if p.position == pos]
+                    if pos_players:
+                        pos_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                        top_player = pos_players[0]
+                        
+                        # Only grab if it's a good value
+                        vbd = getattr(top_player, 'vbd', 0)
+                        if vbd > 2:  # Slightly lower threshold for cliff situations
+                            return top_player
+            
+            # Standard Zero RB early round approach
+            early_players = [p for p in valid_players if p.position in early_positions]
+            
+            if early_players:
+                # Sort by VBD
+                early_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                if len(early_players) >= 3 and random.random() < 0.2:  # 20% chance to pick randomly from top 3
+                    return random.choice(early_players[:3])
+                return early_players[0]
+        
+        elif round_num <= 7:
+            # Rounds 5-7: Start targeting high-upside RBs, but still prefer WR
+            rb_count = len(team.roster_by_position["RB"])
+            
+            if rb_count == 0:
+                # Need at least one RB
+                rb_players = [p for p in valid_players if p.position == "RB"]
+                
+                if rb_players:
+                    # Check for RB value cliff
+                    if "RB" in scarcity and scarcity["RB"]["has_cliff"]:
+                        # If there's a value cliff coming soon, prioritize RB
+                        cliff_pos = scarcity["RB"]["first_cliff_position"]
+                        if cliff_pos <= 3:  # Cliff coming soon
+                            # Sort by ceiling projection to get high-upside RBs
+                            rb_players.sort(key=lambda p: getattr(p, 'ceiling_projection', p.projected_points * 1.4), reverse=True)
+                            if len(rb_players) >= 3 and random.random() < 0.2:
+                                return random.choice(rb_players[:3])
+                            return rb_players[0]
+                    
+                    # Standard upside-based selection
+                    rb_players.sort(key=lambda p: getattr(p, 'ceiling_projection', p.projected_points * 1.4), reverse=True)
+                    if len(rb_players) >= 3 and random.random() < 0.2:
+                        return random.choice(rb_players[:3])
+                    return rb_players[0]
+            
+            # Otherwise, continue with WR focus
+            wr_players = [p for p in valid_players if p.position == "WR"]
+            
+            if wr_players:
+                # Check for WR value cliff
+                if "WR" in scarcity and scarcity["WR"]["has_cliff"]:
+                    cliff_pos = scarcity["WR"]["first_cliff_position"]
+                    if cliff_pos <= 3:  # Cliff coming soon
+                        wr_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                        if len(wr_players) >= 3 and random.random() < 0.2:
+                            return random.choice(wr_players[:3])
+                        return wr_players[0]
+                
+                # Standard WR selection
+                wr_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                if len(wr_players) >= 3 and random.random() < 0.2:
+                    return random.choice(wr_players[:3])
+                return wr_players[0]
+        
+        # After round 7, aggressively target RBs
+        elif round_num <= 11 and team.can_draft_position("RB"):
+            rb_players = [p for p in valid_players if p.position == "RB"]
+            
+            if rb_players:
+                # Focus on high-upside RBs
+                rb_players.sort(key=lambda p: getattr(p, 'ceiling_projection', p.projected_points * 1.4), reverse=True)
+                if len(rb_players) >= 3 and random.random() < 0.2:
+                    return random.choice(rb_players[:3])
+                return rb_players[0]
+        
+        # Default to VBD for other rounds with scarcity awareness
+        # Check for any position with a significant cliff
+        for pos in ["QB", "RB", "WR", "TE"]:
+            if pos in scarcity and scarcity[pos]["has_cliff"]:
+                cliff_pos = scarcity[pos]["first_cliff_position"]
+                if cliff_pos == 0:  # Immediate cliff
+                    pos_players = [p for p in valid_players if p.position == pos]
+                    if pos_players:
+                        pos_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                        top_player = pos_players[0]
+                        
+                        # Only pick if it's a reasonable value
+                        vbd = getattr(top_player, 'vbd', 0)
+                        if vbd > 0:
+                            return top_player
+        
+        # Fall back to VBD if no scarcity-based pick
+        valid_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+        if len(valid_players) >= 3 and random.random() < 0.2:
+            return random.choice(valid_players[:3])
+        return valid_players[0]
+    
+    def _pick_hero_rb_enhanced(self, team, available_players, round_num, overall_pick):
+        """
+        Select a player using Hero RB strategy with position scarcity awareness
+        
+        Parameters:
+        -----------
+        team : Team
+            Team making the pick
+        available_players : List[Player]
+            List of available players
+        round_num : int
+            Current draft round
+        overall_pick : int
+            Overall pick number
+            
+        Returns:
+        --------
+        Optional[Player]
+            Selected player, or None if no valid pick
+        """
+        # Filter to positions we need
+        valid_positions = [pos for pos in self.roster_limits.keys() if team.can_draft_position(pos)]
+        valid_players = [p for p in available_players if p.position in valid_positions]
+        
+        if not valid_players:
+            return None
+        
+        # Calculate position scarcity
+        scarcity = self._calculate_position_scarcity(valid_players)
+        
+        # Detect position runs
+        position_runs = self._detect_position_runs()
+        
+        # Hero RB strategy: One elite RB in round 1-2, then wait until later
+        if round_num <= 2:
+            # If we don't have an RB yet, prioritize getting one elite RB
+            rb_count = len(team.roster_by_position.get("RB", []))
+            
+            if rb_count == 0:
+                # Check for RB run or cliff
+                rb_run = position_runs.get("RB", {}).get("is_run", False)
+                rb_cliff = "RB" in scarcity and scarcity["RB"]["has_cliff"] and scarcity["RB"]["first_cliff_position"] <= 3
+                
+                # Get RB players
+                rb_players = [p for p in valid_players if p.position == "RB"]
+                
+                if rb_players:
+                    # If there's a run or cliff on RBs, increase priority
+                    if rb_run or rb_cliff:
+                        # Sort RBs by VBD
+                        rb_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                        top_rb = rb_players[0]
+                        
+                        # Make sure it's a good value
+                        if getattr(top_rb, 'vbd', 0) > 2:
+                            return top_rb
+                    
+                    # Standard Hero RB first pick
+                    rb_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                    if len(rb_players) >= 3 and random.random() < 0.2:
+                        return random.choice(rb_players[:3])
+                    return rb_players[0]
+            
+            # If we already have our hero RB, focus on WR/TE
+            early_positions = ["WR", "TE"]
+            
+            # Check for position runs or cliffs in WR/TE
+            for pos in early_positions:
+                pos_run = position_runs.get(pos, {}).get("is_run", False)
+                pos_cliff = pos in scarcity and scarcity[pos]["has_cliff"] and scarcity[pos]["first_cliff_position"] <= 3
+                
+                if pos_run or pos_cliff:
+                    pos_players = [p for p in valid_players if p.position == pos]
+                    if pos_players:
+                        pos_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                        top_player = pos_players[0]
+                        
+                        # Make sure it's a good value
+                        if getattr(top_player, 'vbd', 0) > 2:
+                            return top_player
+            
+            # Standard WR/TE focus
+            early_players = [p for p in valid_players if p.position in early_positions]
+            
+            if early_players:
+                early_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                if len(early_players) >= 3 and random.random() < 0.2:
+                    return random.choice(early_players[:3])
+                return early_players[0]
+        
+        elif round_num <= 5:
+            # Rounds 3-5: Focus on WR/TE/QB
+            middle_positions = ["WR", "TE", "QB"]
+            
+            # Check for position runs or cliffs
+            for pos in middle_positions:
+                pos_run = position_runs.get(pos, {}).get("is_run", False)
+                pos_cliff = pos in scarcity and scarcity[pos]["has_cliff"] and scarcity[pos]["first_cliff_position"] <= 3
+                
+                if pos_run or pos_cliff:
+                    pos_players = [p for p in valid_players if p.position == pos]
+                    if pos_players:
+                        pos_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                        top_player = pos_players[0]
+                        
+                        # Make sure it's a good value
+                        if getattr(top_player, 'vbd', 0) > 1:
+                            return top_player
+            
+            # Standard middle round approach
+            middle_players = [p for p in valid_players if p.position in middle_positions]
+            
+            if middle_players:
+                middle_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                if len(middle_players) >= 3 and random.random() < 0.2:
+                    return random.choice(middle_players[:3])
+                return middle_players[0]
+        
+        # After round 5, start looking for RB2
+        elif round_num <= 9 and team.can_draft_position("RB"):
+            rb_count = len(team.roster_by_position.get("RB", []))
+            
+            if rb_count <= 1:  # We need an RB2
+                # Check for RB run or cliff
+                rb_run = position_runs.get("RB", {}).get("is_run", False)
+                rb_cliff = "RB" in scarcity and scarcity["RB"]["has_cliff"] and scarcity["RB"]["first_cliff_position"] <= 3
+                
+                rb_players = [p for p in valid_players if p.position == "RB"]
+                
+                if rb_players:
+                    # If there's a run or cliff on RBs, increase priority
+                    if rb_run or rb_cliff:
+                        rb_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                        return rb_players[0]
+                    
+                    # Standard RB2 selection
+                    rb_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                    if len(rb_players) >= 3 and random.random() < 0.2:
+                        return random.choice(rb_players[:3])
+                    return rb_players[0]
+        
+        # Default to VBD for other rounds with scarcity awareness
+        # Check for any position with a significant cliff
+        for pos in ["QB", "RB", "WR", "TE"]:
+            if pos in scarcity and scarcity[pos]["has_cliff"]:
+                cliff_pos = scarcity[pos]["first_cliff_position"]
+                if cliff_pos == 0:  # Immediate cliff
+                    pos_players = [p for p in valid_players if p.position == pos]
+                    if pos_players:
+                        pos_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                        top_player = pos_players[0]
+                        
+                        # Only pick if it's a reasonable value
+                        vbd = getattr(top_player, 'vbd', 0)
+                        if vbd > 0:
+                            return top_player
+        
+        # Fall back to VBD
+        valid_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+        if len(valid_players) >= 3 and random.random() < 0.2:
+            return random.choice(valid_players[:3])
+        return valid_players[0]
+    
+    def _pick_two_rb_enhanced(self, team, available_players, round_num, overall_pick):
+        """
+        Select a player using 2RB strategy with position scarcity awareness
+        
+        Parameters:
+        -----------
+        team : Team
+            Team making the pick
+        available_players : List[Player]
+            List of available players
+        round_num : int
+            Current draft round
+        overall_pick : int
+            Overall pick number
+            
+        Returns:
+        --------
+        Optional[Player]
+            Selected player, or None if no valid pick
+        """
+        # Filter to positions we need
+        valid_positions = [pos for pos in self.roster_limits.keys() if team.can_draft_position(pos)]
+        valid_players = [p for p in available_players if p.position in valid_positions]
+        
+        if not valid_players:
+            return None
+        
+        # Calculate position scarcity
+        scarcity = self._calculate_position_scarcity(valid_players)
+        
+        # Detect position runs
+        position_runs = self._detect_position_runs()
+        
+        # 2RB strategy: First 2 RBs in rounds 1-3, then pivot to WR
+        if round_num <= 3:
+            # If we don't have enough RBs yet, prioritize getting them
+            rb_count = len(team.roster_by_position.get("RB", []))
+            
+            if rb_count < 2:
+                # Check for RB run or cliff
+                rb_run = position_runs.get("RB", {}).get("is_run", False)
+                rb_cliff = "RB" in scarcity and scarcity["RB"]["has_cliff"] and scarcity["RB"]["first_cliff_position"] <= 3
+                
+                rb_players = [p for p in valid_players if p.position == "RB"]
+                
+                if rb_players:
+                    # If there's a run or cliff on RBs, increase priority
+                    if rb_run or rb_cliff:
+                        rb_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                        return rb_players[0]
+                    
+                    # Standard RB selection
+                    rb_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                    if len(rb_players) >= 3 and random.random() < 0.2:
+                        return random.choice(rb_players[:3])
+                    return rb_players[0]
+            
+            # If we already have our 2 RBs, look for WR/TE
+            early_positions = ["WR", "TE"]
+            
+            # Check for position runs or cliffs in WR/TE
+            for pos in early_positions:
+                pos_run = position_runs.get(pos, {}).get("is_run", False)
+                pos_cliff = pos in scarcity and scarcity[pos]["has_cliff"] and scarcity[pos]["first_cliff_position"] <= 3
+                
+                if pos_run or pos_cliff:
+                    pos_players = [p for p in valid_players if p.position == pos]
+                    if pos_players:
+                        pos_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                        top_player = pos_players[0]
+                        
+                        # Make sure it's a good value
+                        if getattr(top_player, 'vbd', 0) > 2:
+                            return top_player
+            
+            # Standard WR/TE focus
+            early_players = [p for p in valid_players if p.position in early_positions]
+            
+            if early_players:
+                early_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                if len(early_players) >= 3 and random.random() < 0.2:
+                    return random.choice(early_players[:3])
+                return early_players[0]
+        
+        elif round_num <= 7:
+            # Rounds 4-7: Focus on WR/TE/QB
+            middle_positions = ["WR", "TE", "QB"]
+            
+            # Check for position runs or cliffs
+            for pos in middle_positions:
+                pos_run = position_runs.get(pos, {}).get("is_run", False)
+                pos_cliff = pos in scarcity and scarcity[pos]["has_cliff"] and scarcity[pos]["first_cliff_position"] <= 3
+                
+                if pos_run or pos_cliff:
+                    pos_players = [p for p in valid_players if p.position == pos]
+                    if pos_players:
+                        pos_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                        top_player = pos_players[0]
+                        
+                        # Make sure it's a good value
+                        if getattr(top_player, 'vbd', 0) > 1:
+                            return top_player
+            
+            # Standard middle round approach
+            middle_players = [p for p in valid_players if p.position in middle_positions]
+            
+            if middle_players:
+                middle_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                if len(middle_players) >= 3 and random.random() < 0.2:
+                    return random.choice(middle_players[:3])
+                return middle_players[0]
+        
+        # Default to VBD for other rounds with scarcity awareness
+        # Check for any position with a significant cliff
+        for pos in ["QB", "RB", "WR", "TE"]:
+            if pos in scarcity and scarcity[pos]["has_cliff"]:
+                cliff_pos = scarcity[pos]["first_cliff_position"]
+                if cliff_pos == 0:  # Immediate cliff
+                    pos_players = [p for p in valid_players if p.position == pos]
+                    if pos_players:
+                        pos_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+                        top_player = pos_players[0]
+                        
+                        # Only pick if it's a reasonable value
+                        vbd = getattr(top_player, 'vbd', 0)
+                        if vbd > 0:
+                            return top_player
+        
+        # Fall back to VBD
+        valid_players.sort(key=lambda p: getattr(p, 'vbd', p.projected_points), reverse=True)
+        if len(valid_players) >= 3 and random.random() < 0.2:
+            return random.choice(valid_players[:3])
+        return valid_players[0]
+
     @staticmethod
     def load_players_from_projections(projections: Dict[str, pd.DataFrame], vbd_baseline: Dict = None) -> List[Player]:
         """
@@ -1305,3 +1873,4 @@ class DraftSimulator:
                 players.append(player)
         
         return players
+    

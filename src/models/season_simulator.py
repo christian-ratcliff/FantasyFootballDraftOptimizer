@@ -488,8 +488,8 @@ class SeasonSimulator:
             raise ValueError(f"Unsupported number of playoff teams: {self.num_playoff_teams}")
     
     def _simulate_elimination_bracket(self, 
-                                     initial_matchups: List[Tuple[Team, Team]],
-                                     byes: List[Team] = None) -> Dict[str, Any]:
+                                    initial_matchups: List[Tuple[Team, Team]],
+                                    byes: List[Team] = None) -> Dict[str, Any]:
         """
         Simulate an elimination bracket
         
@@ -499,7 +499,7 @@ class SeasonSimulator:
             List of first-round matchups
         byes : List[Team], optional
             Teams with first-round byes
-            
+                
         Returns:
         --------
         Dict[str, Any]
@@ -557,11 +557,21 @@ class SeasonSimulator:
         week += 1
         logger.info(f"Simulating Playoff Semi-Finals (Week {week})...")
         
+        # Handle case when we don't have enough teams for semi-finals
+        if len(round_1_winners) < 4 and len(round_1_winners) > 0:
+            logger.warning(f"Expected 4 teams for semi-finals, got {len(round_1_winners)}. Adding dummy teams to complete bracket.")
+            # Add dummy teams if needed to complete the bracket
+            while len(round_1_winners) < 4:
+                # Create a copy of the first team as a dummy (will likely lose)
+                dummy_team = copy.deepcopy(round_1_winners[0])
+                dummy_team.name = f"{dummy_team.name}_dummy_{len(round_1_winners)}"
+                round_1_winners.append(dummy_team)
+        
         # Make sure we have the right number of teams
         if len(round_1_winners) == 4:
             # Set up semi-final matchups
             # Top remaining seed plays lowest remaining seed
-            round_1_winners.sort(key=lambda t: [s["rank"] for s in self._calculate_standings() if s["team"] == t.name][0])
+            round_1_winners.sort(key=lambda t: next((s["rank"] for s in self._calculate_standings() if s["team"] == t.name), 999))
             semi_matchups = [
                 (round_1_winners[0], round_1_winners[3]),
                 (round_1_winners[1], round_1_winners[2])
@@ -653,12 +663,13 @@ class SeasonSimulator:
                 champion = championship_game.winner
                 runner_up = championship_game.loser
                 
-                if third_place_game:
-                    third_place = third_place_game.winner
-                    fourth_place = third_place_game.loser
-                else:
-                    third_place = None
-                    fourth_place = None
+                third_place = None
+                fourth_place = None
+                if third_place_result:
+                    third_place_game_winner = next((team for team in self.teams if team.name == third_place_result["winner"]), None)
+                    third_place_game_loser = next((team for team in self.teams if team.name == third_place_result["loser"]), None)
+                    third_place = third_place_game_winner
+                    fourth_place = third_place_game_loser
                 
                 # Final bracket results
                 bracket_results = {
@@ -672,7 +683,7 @@ class SeasonSimulator:
                 return bracket_results
             
             else:
-                logger.error("Expected 2 semi-final winners, got {len(semi_winners)}")
+                logger.error(f"Expected 2 semi-final winners, got {len(semi_winners)}")
                 return {"rounds": results_by_round}
         
         else:

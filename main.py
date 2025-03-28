@@ -98,6 +98,54 @@ PPO_BATCH_SIZE = 32  # Batch size for PPO training
 PPO_POLICY_CLIP = 0.1  # Policy clipping parameter for PPO
 PPO_ENTROPY_COEF = 0.02  # Entropy coefficient for PPO
 USE_TOP_N_FEATURES = 7
+CURRICULUM_ENABLED = True
+CURRICULUM_PARAMS = {
+    'phase_durations': {
+        1: 200,  # Episodes in phase 1
+        2: 500,  # Episodes in phase 2 
+        3: 700,  # Episodes in phase 3
+        4: float('inf')  # Phase 4 continues until end
+    },
+    'phase_thresholds': {
+        1: 0.7,  # 70% valid rosters  
+        2: 100.0,  # Minimum total projected points
+        3: 120.0,  # Minimum starter points
+    },
+    'reward_mix_weights': {  # How much to include previous phase rewards
+        1: [1.0, 0.0, 0.0, 0.0],
+        2: [0.3, 0.7, 0.0, 0.0],
+        3: [0.1, 0.3, 0.6, 0.0],
+        4: [0.05, 0.15, 0.3, 0.5]
+    },
+    'max_stuck_episodes': 100,  # Maximum episodes to be stuck before forcing advancement
+    'phase_stability_window': 20  # Episodes to consider for stability
+}
+
+# Opponent Modeling Settings
+OPPONENT_MODELING_ENABLED = True  # Whether to use opponent modeling
+POSITION_SCARCITY_WEIGHT = 1.2    # Weight for position scarcity (higher = more importance)
+RUN_DETECTION_THRESHOLD = 0.25    # Threshold to detect a position run (percentage of recent picks)
+VALUE_CLIFF_THRESHOLD = 0.15      # Threshold to detect a value cliff (percentage drop)
+ADAPTIVE_POSITION_WEIGHTS = True  # Use adaptive position weighting
+PICK_PREDICTION_DEPTH = 8         # Number of future picks to predict
+
+# Hierarchical PPO settings
+USE_HIERARCHICAL_PPO = True  # Whether to use hierarchical PPO
+HIERARCHICAL_PPO_MODEL_PATH = 'data/models/ppo_models/hierarchical_ppo_final'
+META_POLICY_LR = 0.0003  # Learning rate for meta policy
+SUB_POLICY_LR = 0.0003  # Learning rate for sub policies
+
+# Population-based Training Settings
+USE_POPULATION_TRAINING = True  # Whether to use population-based training
+POPULATION_SIZE = 5              # Number of agents in the population
+HIERARCHICAL_RATIO = 0.4         # Ratio of hierarchical PPO agents (0.0 to 1.0)
+EVOLUTION_INTERVAL = 50          # Number of episodes between evolution events
+TOURNAMENT_SIZE = 3              # Number of agents in tournament selection
+MUTATION_RATE = 0.1              # Probability of parameter mutation 
+MUTATION_STRENGTH = 0.2          # Magnitude of mutations
+ELITISM_COUNT = 1                # Number of top agents preserved unchanged
+ENABLE_CROSSOVER = True          # Whether to enable crossover between agents
+
 
 # Draft Analysis Output
 SAVE_DRAFT_RESULTS = True  # Whether to save draft results
@@ -137,6 +185,9 @@ from src.models.draft_simulator import DraftSimulator, Player
 from src.models.season_simulator import SeasonSimulator, SeasonEvaluator
 from src.models.projections import ProjectionModelLoader
 from src.models.lineup_evaluator import LineupEvaluator
+from src.models.hierarchical_ppo_drafter import HierarchicalPPODrafter
+from src.models.ppo_population import PPOPopulation
+
 
 def load_config(config_path):
     """Load configuration from file"""
@@ -662,218 +713,6 @@ def evaluate_projections(processed_data, projections, projection_year, output_di
     
     return results
 
-def run_draft_simulations(projections, league_info, roster_limits, scoring_settings, ppo_model=None, results_dir=None):
-    """
-    Run draft simulations
-    
-    Parameters:
-    -----------
-    projections : dict
-        Dictionary of player projections by position
-    league_info : dict
-        Dictionary containing league information
-    roster_limits : dict
-        Dictionary of roster position limits
-    scoring_settings : dict
-        Dictionary of scoring settings
-    ppo_model : PPODrafter
-        PPO model to use for RL strategy (if None, use baseline strategies)
-    results_dir : str
-        Directory to save results
-        
-    Returns:
-    --------
-    dict
-        Dictionary of simulation results
-    """
-    
-    logger.info("Running draft simulations...")
-    
-    # Ensure results directory exists
-    if results_dir:
-        os.makedirs(results_dir, exist_ok=True)
-    
-    # Extract league size
-    league_size = league_info.get('league_info', {}).get('team_count', 10)
-    
-    # Prepare baseline values for VBD
-    # Define baseline indices by position (typically the last starter at each position)
-    baseline_indices = {
-        "QB": league_size,  # Last starting QB
-        "RB": league_size * 2 + 2,  # Last starting RB including 2 FLEX
-        "WR": league_size * 2 + 2,  # Last starting WR including 2 FLEX
-        "TE": league_size,  # Last starting TE
-        "K": league_size,  # Last starting K
-        "DST": league_size  # Last starting DST
-    }
-    
-    # Calculate baseline values
-    vbd_baseline = {}
-    for position, df in projections.items():
-        pos = position.upper()
-        if df is not None and not df.empty and "projected_points" in df.columns:
-            # Sort by projected points
-            sorted_df = df.sort_values("projected_points", ascending=False)
-            
-            # Get the baseline player
-            index = baseline_indices.get(pos, 0)
-            if index < len(sorted_df):
-                vbd_baseline[pos] = sorted_df.iloc[index]["projected_points"]
-            else:
-                # If not enough players, use the last player's points
-                vbd_baseline[pos] = sorted_df.iloc[-1]["projected_points"] if not sorted_df.empty else 0
-    
-    # Load players from projections
-    all_players = DraftSimulator.load_players_from_projections(projections, vbd_baseline)
-    
-    # Log players loaded by position
-    position_counts = {}
-    for player in all_players:
-        position_counts[player.position] = position_counts.get(player.position, 0) + 1
-    
-    logger.info(f"Loaded {len(all_players)} players for draft simulation:")
-    for pos, count in position_counts.items():
-        logger.info(f"  {pos}: {count} players")
-    
-    # Results containers
-    all_teams = []
-    all_draft_histories = []
-    strategy_metrics = {strategy: [] for strategy in DRAFT_STRATEGIES_TO_TEST}
-
-    # Run simulations
-    for sim in range(NUM_DRAFT_SIMULATIONS):
-        logger.info(f"Running draft simulation {sim+1}/{NUM_DRAFT_SIMULATIONS}")
-        
-        # Create a fresh deep copy of players for each simulation
-        fresh_players = copy.deepcopy(all_players)
-        
-        # Reset draft status for all players
-        for player in fresh_players:
-            player.is_drafted = False
-            player.drafted_round = None
-            player.drafted_pick = None
-            player.drafted_team = None
-            
-            # Add some randomness to projected points (within a small range) 
-            # to create variety between simulations
-            variation = random.uniform(0.95, 1.05)  # 5% variation
-            player.projected_points = player.projected_points * variation
-        
-        # Create simulator with the fresh players
-        draft_sim = DraftSimulator(
-            players=fresh_players,
-            league_size=league_size,
-            roster_limits=roster_limits,
-            num_rounds=sum(roster_limits.values()),
-            scoring_settings=scoring_settings,
-            user_pick=USER_DRAFT_POSITION
-        )
-        
-        # Inject PPO model if available
-        if ppo_model is not None:
-            # Replace "RL" strategy with "PPO" strategy
-            for team in draft_sim.teams:
-                if team.strategy == "RL":
-                    team.strategy = "PPO"
-            
-            # Rename strategy in metrics tracking
-            if "RL" in strategy_metrics and "PPO" not in strategy_metrics:
-                strategy_metrics["PPO"] = strategy_metrics.pop("RL")
-        
-        # Run draft
-        teams, draft_history = draft_sim.run_draft(ppo_model=ppo_model)
-        
-        # Reset random seed for next simulation
-        random.seed(time.time() + sim)
-        
-        # Store results
-        all_teams.append(teams)
-        all_draft_histories.append(draft_history)
-        
-        # Generate draft report
-        if results_dir:
-            report_path = os.path.join(results_dir, f"draft_simulation_{sim+1}.csv")
-            draft_sim.create_draft_report(output_path=report_path)
-        
-        # Calculate metrics by strategy
-        for team in teams:
-            if team.strategy in strategy_metrics:
-                strategy_metrics[team.strategy].append({
-                    "total_points": team.get_total_projected_points(),
-                    "starting_points": team.get_starting_lineup_points(),
-                    "team_name": team.name,
-                    "draft_position": team.draft_position
-                })
-    
-    # Aggregate metrics
-    summary = {}
-    
-    for strategy, metrics in strategy_metrics.items():
-        if not metrics:
-            continue
-            
-        # Calculate averages
-        avg_total = sum(m["total_points"] for m in metrics) / len(metrics)
-        avg_starters = sum(m["starting_points"] for m in metrics) / len(metrics)
-        
-        summary[strategy] = {
-            "avg_total_points": avg_total,
-            "avg_starter_points": avg_starters,
-            "num_simulations": len(metrics),
-            "details": metrics
-        }
-    
-    # Create a summary DataFrame
-    summary_df = pd.DataFrame([
-        {
-            "Strategy": strategy,
-            "Avg Total Points": data["avg_total_points"],
-            "Avg Starter Points": data["avg_starter_points"],
-            "Simulations": data["num_simulations"]
-        }
-        for strategy, data in summary.items()
-    ])
-    
-    # Save summary
-    if results_dir:
-        summary_path = os.path.join(results_dir, "draft_summary.csv")
-        summary_df.to_csv(summary_path, index=False)
-        
-        # Create visualization
-        plt.figure(figsize=(12, 8))
-        
-        # Plot average starter points by strategy
-        ax = sns.barplot(
-            x="Strategy", 
-            y="Avg Starter Points", 
-            data=summary_df, 
-            palette="viridis"
-        )
-        
-        # Add data labels
-        for i, row in enumerate(summary_df.itertuples()):
-            ax.text(
-                i, 
-                row._3 + 5,  # Add a small offset
-                f"{row._3:.1f}",
-                ha='center'
-            )
-        
-        plt.title("Average Starter Points by Draft Strategy")
-        plt.grid(axis='y', linestyle='--', alpha=0.7)
-        
-        # Save figure
-        plt.tight_layout()
-        plt.savefig(os.path.join(results_dir, "draft_strategy_comparison.png"), dpi=300)
-        plt.close()
-    
-    # Return summary
-    return {
-        "summary": summary,
-        "summary_df": summary_df,
-        "teams": all_teams,
-        "draft_histories": all_draft_histories
-    }
 
 def run_season_simulations(draft_results, league_info, results_dir):
     """
@@ -1072,9 +911,296 @@ def run_season_simulations(draft_results, league_info, results_dir):
     }
 
 
+# def train_ppo_model(projections, league_info, roster_limits, scoring_settings, models_dir, projection_models=None):
+#     """
+#     Train a PPO model for draft optimization with opponent modeling
+    
+#     Parameters:
+#     -----------
+#     projections : dict
+#         Dictionary of player projections by position
+#     league_info : dict
+#         Dictionary containing league information
+#     roster_limits : dict
+#         Dictionary of roster position limits
+#     scoring_settings : dict
+#         Dictionary of scoring settings
+#     models_dir : str
+#         Directory to save models
+#     projection_models : dict, optional
+#         Dictionary of pre-loaded projection models by position
+        
+#     Returns:
+#     --------
+#     tuple
+#         (PPO model, training results)
+#     """
+#     logger.info("Training PPO model for draft optimization...")
+    
+#     # Make sure we have projection models
+#     if projection_models is None:
+#         logger.info("Loading projection models...")
+#         projection_loader = ProjectionModelLoader(models_dir)
+#         projection_models = projection_loader.models
+        
+#         # Check if we loaded any models
+#         if not projection_models:
+#             logger.warning("No projection models found! Using default features.")
+#         else:
+#             logger.info(f"Loaded {len(projection_models)} projection models: {list(projection_models.keys())}")
+    
+#     # Create directory for PPO models
+#     ppo_models_dir = os.path.join(models_dir, 'ppo_models')
+#     os.makedirs(ppo_models_dir, exist_ok=True)
+    
+#     # Check if pre-trained model should be used
+#     if USE_EXISTING_PPO_MODEL and os.path.exists(PPO_MODEL_PATH + "_actor.weights.h5"):
+#         logger.info(f"Loading existing PPO model from {PPO_MODEL_PATH}")
+#         try:
+#             ppo_model = PPODrafter.load_model(PPO_MODEL_PATH)
+#             # Return early with the loaded model
+#             return ppo_model, {"loaded_from": PPO_MODEL_PATH}
+#         except Exception as e:
+#             logger.error(f"Error loading PPO model: {e}")
+#             logger.info("Will train a new model instead")
+    
+#     # Extract league size
+#     league_size = league_info.get('league_info', {}).get('team_count', 10)
+    
+#     # Prepare baseline values for VBD
+#     baseline_indices = {
+#         "QB": league_size,
+#         "RB": league_size * 2 + 2,
+#         "WR": league_size * 2 + 2,
+#         "TE": league_size,
+#         "K": league_size,
+#         "DST": league_size
+#     }
+    
+#     # Calculate baseline values
+#     vbd_baseline = {}
+#     for position, df in projections.items():
+#         pos = position.upper()
+#         if df is not None and not df.empty and "projected_points" in df.columns:
+#             sorted_df = df.sort_values("projected_points", ascending=False)
+#             index = baseline_indices.get(pos, 0)
+#             if index < len(sorted_df):
+#                 vbd_baseline[pos] = sorted_df.iloc[index]["projected_points"]
+#             else:
+#                 vbd_baseline[pos] = sorted_df.iloc[-1]["projected_points"] if not sorted_df.empty else 0
+    
+#     # Load players from projections
+#     all_players = DraftSimulator.load_players_from_projections(projections, vbd_baseline)
+    
+#     # Create draft simulator with projection models
+#     draft_simulator = DraftSimulator(
+#         players=all_players,
+#         league_size=league_size,
+#         roster_limits=roster_limits,
+#         num_rounds=18,  # Standard number of rounds
+#         scoring_settings=scoring_settings,
+#         user_pick=None,
+#         projection_models=projection_models  # Pass projection models here
+#     )
+    
+#     # Find or create the RL team
+#     ppo_draft_position = random.randint(1, league_size)
+#     rl_team = next((team for team in draft_simulator.teams 
+#                  if team.draft_position == ppo_draft_position), None)
+#     if not rl_team:
+#         # If no RL team found, set the first team to use RL
+#         rl_team = random.choice(draft_simulator.teams)
+#         rl_team.strategy = "PPO"
+    
+#     # Create a sample state to determine dimensions
+#     available_players = [p for p in draft_simulator.players if not p.is_drafted]
+    
+#     # Get starter limits if available in scoring settings
+#     starter_limits = {}
+#     if scoring_settings and 'starter_limits' in scoring_settings:
+#         starter_limits = scoring_settings['starter_limits']
+    
+#     # Create a sample state with opponent modeling if enabled
+#     if OPPONENT_MODELING_ENABLED:
+#         sample_state = DraftState(
+#             team=rl_team,
+#             available_players=available_players,
+#             round_num=1,
+#             overall_pick=1,
+#             league_size=draft_simulator.league_size,
+#             roster_limits=draft_simulator.roster_limits,
+#             max_rounds=draft_simulator.num_rounds,
+#             all_teams=draft_simulator.teams,
+#             starter_limits=starter_limits
+#         )
+#     else:
+#         sample_state = DraftState(
+#             team=rl_team,
+#             available_players=available_players,
+#             round_num=1,
+#             overall_pick=1,
+#             league_size=draft_simulator.league_size,
+#             roster_limits=draft_simulator.roster_limits,
+#             max_rounds=draft_simulator.num_rounds
+#         )
+    
+#     # Get dimensions from sample state
+#     state_dim = len(sample_state.to_feature_vector())
+#     action_feature_dim = len(sample_state.get_action_features(0))
+#     action_dim = 256  # Maximum number of players to consider at once
+    
+#     logger.info(f"State dimension: {state_dim}, Action feature dimension: {action_feature_dim}")
+    
+#     # Create PPO model with opponent modeling
+#     ppo_model = PPODrafter(
+#         state_dim=state_dim,
+#         action_feature_dim=action_feature_dim,
+#         action_dim=action_dim,
+#         lr_actor=PPO_LEARNING_RATE,
+#         lr_critic=PPO_LEARNING_RATE,
+#         gamma=PPO_GAMMA,
+#         batch_size=PPO_BATCH_SIZE,
+#         policy_clip=PPO_POLICY_CLIP,
+#         entropy_coef=PPO_ENTROPY_COEF,
+#         use_top_n_features=USE_TOP_N_FEATURES,
+#         curriculum_enabled=CURRICULUM_ENABLED,
+#         opponent_modeling_enabled=OPPONENT_MODELING_ENABLED
+#     )
+    
+#     # Set opponent modeling parameters if enabled
+#     if OPPONENT_MODELING_ENABLED:
+#         # Initialize position weights
+#         ppo_model.position_priority_weights = {
+#             "QB": 1.0,
+#             "RB": 1.5,  # Start with slightly higher weight for RB
+#             "WR": 1.2,  # Start with slightly higher weight for WR
+#             "TE": 0.9,
+#             "K": 0.5,
+#             "DST": 0.5
+#         }
+        
+#         # Set additional parameters
+#         ppo_model.position_scarcity_weight = POSITION_SCARCITY_WEIGHT
+#         ppo_model.run_detection_threshold = RUN_DETECTION_THRESHOLD
+#         ppo_model.value_cliff_threshold = VALUE_CLIFF_THRESHOLD
+#         ppo_model.pick_prediction_depth = PICK_PREDICTION_DEPTH
+        
+#         logger.info(f"Opponent modeling enabled with parameters:")
+#         logger.info(f"  Position scarcity weight: {POSITION_SCARCITY_WEIGHT}")
+#         logger.info(f"  Run detection threshold: {RUN_DETECTION_THRESHOLD}")
+#         logger.info(f"  Value cliff threshold: {VALUE_CLIFF_THRESHOLD}")
+    
+#     # Set curriculum parameters if enabled
+#     if CURRICULUM_ENABLED and CURRICULUM_PARAMS:
+#         for param_name, param_value in CURRICULUM_PARAMS.items():
+#             if hasattr(ppo_model, param_name):
+#                 setattr(ppo_model, param_name, param_value)
+#             elif isinstance(param_value, dict) and hasattr(ppo_model, param_name):
+#                 # For dictionary parameters like phase_durations
+#                 getattr(ppo_model, param_name).update(param_value)
+    
+#     # Create season simulator for training
+#     season_simulator = SeasonSimulator(
+#         teams=draft_simulator.teams,
+#         num_regular_weeks=NUM_REGULAR_WEEKS,
+#         num_playoff_teams=NUM_PLAYOFF_TEAMS,
+#         num_playoff_weeks=NUM_PLAYOFF_WEEKS,
+#         randomness=RANDOMNESS_FACTOR
+#     )
+    
+#     # Train the model
+#     logger.info(f"Training PPO model for {NUM_PPO_EPISODES} episodes")
+#     start_time = time.time()
+    
+#     training_results = ppo_model.train(
+#         draft_simulator=draft_simulator,
+#         season_simulator=season_simulator,
+#         num_episodes=NUM_PPO_EPISODES,
+#         eval_interval=PPO_EVAL_INTERVAL,
+#         save_interval=PPO_SAVE_INTERVAL,
+#         save_path=ppo_models_dir
+#     )
+    
+#     training_time = time.time() - start_time
+#     logger.info(f"PPO training completed in {training_time:.2f} seconds")
+    
+#     # Save final model to the main path
+#     ppo_model.save_model(PPO_MODEL_PATH)
+    
+#     # Generate learning verification visualizations
+#     try:
+#         # Generate standard learning visualizations
+#         if hasattr(ppo_model, 'generate_learning_visualizations'):
+#             ppo_model.generate_learning_visualizations(output_dir=ppo_models_dir)
+#         else:
+#             from src.analysis.visualizer import generate_learning_visualizations
+#             generate_learning_visualizations(ppo_model, output_dir=ppo_models_dir)
+        
+#         logger.info("Generated learning verification visualizations")
+        
+#         # Generate opponent modeling visualizations if enabled
+#         if OPPONENT_MODELING_ENABLED and hasattr(ppo_model, 'generate_opponent_modeling_visualizations'):
+#             ppo_model.generate_opponent_modeling_visualizations(output_dir=ppo_models_dir)
+#             logger.info("Generated opponent modeling visualizations")
+#     except Exception as e:
+#         logger.error(f"Error generating visualizations: {e}")
+    
+#     # Create simplified training progress plot if not already created
+#     plt.figure(figsize=(12, 6))
+#     plt.plot(training_results['rewards_history'])
+#     plt.title('PPO Training Progress')
+#     plt.xlabel('Episode')
+#     plt.ylabel('Reward')
+#     plt.grid(True)
+#     plt.savefig(os.path.join(ppo_models_dir, 'training_progress.png'))
+    
+#     # Plot win rates if available
+#     if training_results['win_rates']:
+#         plt.figure(figsize=(12, 6))
+        
+#         # Extract win rates for each strategy
+#         strategies = list(training_results['win_rates'][0].keys())
+#         for strategy in strategies:
+#             win_rates = [wr.get(strategy, 0) for wr in training_results['win_rates']]
+#             plt.plot(
+#                 range(PPO_EVAL_INTERVAL, NUM_PPO_EPISODES + 1, PPO_EVAL_INTERVAL),
+#                 win_rates,
+#                 label=strategy
+#             )
+        
+#         plt.title('Win Rates by Strategy')
+#         plt.xlabel('Episode')
+#         plt.ylabel('Win Rate')
+#         plt.legend()
+#         plt.grid(True)
+#         plt.savefig(os.path.join(ppo_models_dir, 'win_rates.png'))
+    
+#     # Plot opponent modeling metrics if enabled
+#     if OPPONENT_MODELING_ENABLED and 'opponent_predictions' in training_results:
+#         plt.figure(figsize=(12, 6))
+        
+#         # Extract accuracy data
+#         accuracies = [data['accuracy'] for data in training_results['opponent_predictions']]
+#         episodes = [data['episode'] for data in training_results['opponent_predictions']]
+        
+#         plt.plot(episodes, accuracies, 'o-')
+#         plt.axhline(y=0.25, color='r', linestyle='--', label='Random Guess (4 positions)')
+        
+#         plt.title('Opponent Pick Prediction Accuracy')
+#         plt.xlabel('Episode')
+#         plt.ylabel('Accuracy')
+#         plt.ylim(0, 1)
+#         plt.grid(True)
+#         plt.legend()
+#         plt.savefig(os.path.join(ppo_models_dir, 'opponent_prediction_accuracy.png'))
+    
+#     plt.close('all')  # Close all figures to free memory
+    
+#     return ppo_model, training_results
+
 def train_ppo_model(projections, league_info, roster_limits, scoring_settings, models_dir, projection_models=None):
     """
-    Train a PPO model for draft optimization
+    Train a PPO model for draft optimization with opponent modeling
     
     Parameters:
     -----------
@@ -1115,15 +1241,23 @@ def train_ppo_model(projections, league_info, roster_limits, scoring_settings, m
     os.makedirs(ppo_models_dir, exist_ok=True)
     
     # Check if pre-trained model should be used
-    if USE_EXISTING_PPO_MODEL and os.path.exists(PPO_MODEL_PATH + "_actor.weights.h5"):
-        logger.info(f"Loading existing PPO model from {PPO_MODEL_PATH}")
-        try:
-            ppo_model = PPODrafter.load_model(PPO_MODEL_PATH)
-            # Return early with the loaded model
-            return ppo_model, {"loaded_from": PPO_MODEL_PATH}
-        except Exception as e:
-            logger.error(f"Error loading PPO model: {e}")
-            logger.info("Will train a new model instead")
+    if USE_EXISTING_PPO_MODEL:
+        if USE_HIERARCHICAL_PPO and os.path.exists(HIERARCHICAL_PPO_MODEL_PATH + "_meta_policy.weights.h5"):
+            logger.info(f"Loading existing hierarchical PPO model from {HIERARCHICAL_PPO_MODEL_PATH}")
+            try:
+                ppo_model = HierarchicalPPODrafter.load_model(HIERARCHICAL_PPO_MODEL_PATH)
+                return ppo_model, {"loaded_from": HIERARCHICAL_PPO_MODEL_PATH}
+            except Exception as e:
+                logger.error(f"Error loading hierarchical PPO model: {e}")
+                logger.info("Will train a new model instead")
+        elif not USE_HIERARCHICAL_PPO and os.path.exists(PPO_MODEL_PATH + "_actor.weights.h5"):
+            logger.info(f"Loading existing PPO model from {PPO_MODEL_PATH}")
+            try:
+                ppo_model = PPODrafter.load_model(PPO_MODEL_PATH)
+                return ppo_model, {"loaded_from": PPO_MODEL_PATH}
+            except Exception as e:
+                logger.error(f"Error loading PPO model: {e}")
+                logger.info("Will train a new model instead")
     
     # Extract league size
     league_size = league_info.get('league_info', {}).get('team_count', 10)
@@ -1175,6 +1309,13 @@ def train_ppo_model(projections, league_info, roster_limits, scoring_settings, m
     
     # Create a sample state to determine dimensions
     available_players = [p for p in draft_simulator.players if not p.is_drafted]
+    
+    # Get starter limits if available in scoring settings
+    starter_limits = {}
+    if scoring_settings and 'starter_limits' in scoring_settings:
+        starter_limits = scoring_settings['starter_limits']
+    
+    # Create a sample state with opponent modeling
     sample_state = DraftState(
         team=rl_team,
         available_players=available_players,
@@ -1183,6 +1324,8 @@ def train_ppo_model(projections, league_info, roster_limits, scoring_settings, m
         league_size=draft_simulator.league_size,
         roster_limits=draft_simulator.roster_limits,
         max_rounds=draft_simulator.num_rounds,
+        all_teams=draft_simulator.teams,
+        starter_limits=starter_limits
     )
     
     # Get dimensions from sample state
@@ -1191,103 +1334,614 @@ def train_ppo_model(projections, league_info, roster_limits, scoring_settings, m
     action_dim = 256  # Maximum number of players to consider at once
     
     logger.info(f"State dimension: {state_dim}, Action feature dimension: {action_feature_dim}")
-    
-    # Create PPO model
-    ppo_model = PPODrafter(
-        state_dim=state_dim,
-        action_feature_dim=action_feature_dim,
-        action_dim=action_dim,
-        lr_actor=PPO_LEARNING_RATE,
-        lr_critic=PPO_LEARNING_RATE,
-        gamma=PPO_GAMMA,
-        batch_size=PPO_BATCH_SIZE,
-        policy_clip=PPO_POLICY_CLIP,
-        entropy_coef=PPO_ENTROPY_COEF,
-        use_top_n_features=USE_TOP_N_FEATURES
-    )
     # Create season simulator for training
-    season_simulator = SeasonSimulator(
-        teams=draft_simulator.teams,
-        num_regular_weeks=NUM_REGULAR_WEEKS,
-        num_playoff_teams=NUM_PLAYOFF_TEAMS,
-        num_playoff_weeks=NUM_PLAYOFF_WEEKS,
-        randomness=RANDOMNESS_FACTOR
-    )
-    # No need to create a season simulator here since we'll use LineupEvaluator in the training method
     
-    # Train the model
-    logger.info(f"Training PPO model for {NUM_PPO_EPISODES} episodes")
-    start_time = time.time()
-    
-    training_results = ppo_model.train(
-        draft_simulator=draft_simulator,
-        season_simulator=season_simulator,
-        num_episodes=NUM_PPO_EPISODES,
-        eval_interval=PPO_EVAL_INTERVAL,
-        save_interval=PPO_SAVE_INTERVAL,
-        save_path=ppo_models_dir
-    )
-    
-    training_time = time.time() - start_time
-    logger.info(f"PPO training completed in {training_time:.2f} seconds")
-    
-    # Save final model to the main path
-    ppo_model.save_model(PPO_MODEL_PATH)
-    
-    # Generate learning verification visualizations
-    try:
-        # Either call as a method if you've added it to PPODrafter
-        if hasattr(ppo_model, 'generate_learning_visualizations'):
-            ppo_model.generate_learning_visualizations(output_dir=ppo_models_dir)
-        # Or call the standalone function if you've created it
+    if USE_POPULATION_TRAINING:
+        logger.info(f"Using population-based training with {POPULATION_SIZE} agents")
+        season_simulator = SeasonSimulator(
+            teams=draft_simulator.teams,
+            num_regular_weeks=NUM_REGULAR_WEEKS,
+            num_playoff_teams=NUM_PLAYOFF_TEAMS,
+            num_playoff_weeks=NUM_PLAYOFF_WEEKS,
+            randomness=RANDOMNESS_FACTOR
+        )
+        # Create population
+        population = PPOPopulation(
+            population_size=POPULATION_SIZE,
+            state_dim=state_dim,
+            action_feature_dim=action_feature_dim,
+            action_dim=action_dim,
+            hierarchical_ratio=HIERARCHICAL_RATIO,
+            evolution_interval=EVOLUTION_INTERVAL,
+            tournament_size=TOURNAMENT_SIZE,
+            mutation_rate=MUTATION_RATE,
+            mutation_strength=MUTATION_STRENGTH,
+            elitism_count=ELITISM_COUNT,
+            output_dir=ppo_models_dir,
+            use_top_n_features=USE_TOP_N_FEATURES,
+            enable_crossover=ENABLE_CROSSOVER,
+            curriculum_enabled=CURRICULUM_ENABLED,
+            opponent_modeling_enabled=OPPONENT_MODELING_ENABLED
+        )
+        
+        # Train the population
+        start_time = time.time()
+        
+        population_results = population.train_population(
+            draft_simulator=draft_simulator,
+            season_simulator=season_simulator,
+            num_episodes=NUM_PPO_EPISODES,
+            eval_interval=PPO_EVAL_INTERVAL,
+            save_interval=PPO_SAVE_INTERVAL
+        )
+        
+        training_time = time.time() - start_time
+        logger.info(f"Population training completed in {training_time:.2f} seconds")
+        
+        # Get the best agent from the population
+        ppo_model = population.get_best_agent()
+        
+        # Save the best agent to the main path
+        if isinstance(ppo_model, HierarchicalPPODrafter):
+            ppo_model.save_model(HIERARCHICAL_PPO_MODEL_PATH)
         else:
-            # Import it if it's in another module
-            from src.analysis.visualizer import generate_learning_visualizations
-            generate_learning_visualizations(ppo_model, output_dir=ppo_models_dir)
+            ppo_model.save_model(PPO_MODEL_PATH)
         
-        logger.info("Generated learning verification visualizations")
-    except Exception as e:
-        logger.error(f"Error generating learning visualizations: {e}")
-    
-    # Create simplified training progress plot if not already created
-    plt.figure(figsize=(12, 6))
-    plt.plot(training_results['rewards_history'])
-    plt.title('PPO Training Progress')
-    plt.xlabel('Episode')
-    plt.ylabel('Reward')
-    plt.grid(True)
-    plt.savefig(os.path.join(ppo_models_dir, 'training_progress.png'))
-    
-    # Plot win rates if available
-    if training_results['win_rates']:
-        plt.figure(figsize=(12, 6))
-        
-        # Extract win rates for each strategy
-        strategies = list(training_results['win_rates'][0].keys())
-        for strategy in strategies:
-            win_rates = [wr.get(strategy, 0) for wr in training_results['win_rates']]
-            plt.plot(
-                range(PPO_EVAL_INTERVAL, NUM_PPO_EPISODES + 1, PPO_EVAL_INTERVAL),
-                win_rates,
-                label=strategy
+        return ppo_model, population_results
+    else:
+        # Create PPO model - either hierarchical or standard
+        if USE_HIERARCHICAL_PPO:
+            logger.info("Creating hierarchical PPO model")
+            ppo_model = HierarchicalPPODrafter(
+                state_dim=state_dim,
+                action_feature_dim=action_feature_dim,
+                action_dim=action_dim,
+                lr_meta=META_POLICY_LR,
+                lr_sub=SUB_POLICY_LR,
+                lr_critic=PPO_LEARNING_RATE,
+                gamma=PPO_GAMMA,
+                batch_size=PPO_BATCH_SIZE,
+                policy_clip=PPO_POLICY_CLIP,
+                entropy_coef=PPO_ENTROPY_COEF,
+                use_top_n_features=USE_TOP_N_FEATURES,
+                curriculum_enabled=CURRICULUM_ENABLED,
+                opponent_modeling_enabled=OPPONENT_MODELING_ENABLED
+            )
+        else:
+            logger.info("Creating standard PPO model")
+            ppo_model = PPODrafter(
+                state_dim=state_dim,
+                action_feature_dim=action_feature_dim,
+                action_dim=action_dim,
+                lr_actor=PPO_LEARNING_RATE,
+                lr_critic=PPO_LEARNING_RATE,
+                gamma=PPO_GAMMA,
+                batch_size=PPO_BATCH_SIZE,
+                policy_clip=PPO_POLICY_CLIP,
+                entropy_coef=PPO_ENTROPY_COEF,
+                use_top_n_features=USE_TOP_N_FEATURES,
+                curriculum_enabled=CURRICULUM_ENABLED,
+                opponent_modeling_enabled=OPPONENT_MODELING_ENABLED
             )
         
-        plt.title('Win Rates by Strategy')
-        plt.xlabel('Episode')
-        plt.ylabel('Win Rate')
-        plt.legend()
-        plt.grid(True)
-        plt.savefig(os.path.join(ppo_models_dir, 'win_rates.png'))
-    return ppo_model, training_results
+        # Set opponent modeling parameters if enabled
+        if OPPONENT_MODELING_ENABLED:
+            # Initialize position weights
+            ppo_model.position_priority_weights = {
+                "QB": 1.0,
+                "RB": 1.5,  # Start with slightly higher weight for RB
+                "WR": 1.2,  # Start with slightly higher weight for WR
+                "TE": 0.9,
+                "K": 0.5,
+                "DST": 0.5
+            }
+            
+            # Set additional parameters
+            ppo_model.position_scarcity_weight = POSITION_SCARCITY_WEIGHT
+            ppo_model.run_detection_threshold = RUN_DETECTION_THRESHOLD
+            ppo_model.value_cliff_threshold = VALUE_CLIFF_THRESHOLD
+            ppo_model.pick_prediction_depth = PICK_PREDICTION_DEPTH
+            
+            logger.info(f"Opponent modeling enabled with parameters:")
+            logger.info(f"  Position scarcity weight: {POSITION_SCARCITY_WEIGHT}")
+            logger.info(f"  Run detection threshold: {RUN_DETECTION_THRESHOLD}")
+            logger.info(f"  Value cliff threshold: {VALUE_CLIFF_THRESHOLD}")
+        
+        # Set curriculum parameters if enabled
+        if CURRICULUM_ENABLED and CURRICULUM_PARAMS:
+            for param_name, param_value in CURRICULUM_PARAMS.items():
+                if hasattr(ppo_model, param_name):
+                    setattr(ppo_model, param_name, param_value)
+                elif isinstance(param_value, dict) and hasattr(ppo_model, param_name):
+                    # For dictionary parameters like phase_durations
+                    getattr(ppo_model, param_name).update(param_value)
+        
+        # Create season simulator for training
+        season_simulator = SeasonSimulator(
+            teams=draft_simulator.teams,
+            num_regular_weeks=NUM_REGULAR_WEEKS,
+            num_playoff_teams=NUM_PLAYOFF_TEAMS,
+            num_playoff_weeks=NUM_PLAYOFF_WEEKS,
+            randomness=RANDOMNESS_FACTOR
+        )
+        
+        # Train the model
+        logger.info(f"Training {'hierarchical' if USE_HIERARCHICAL_PPO else 'standard'} PPO model for {NUM_PPO_EPISODES} episodes")
+        start_time = time.time()
+        
+        training_results = ppo_model.train(
+            draft_simulator=draft_simulator,
+            season_simulator=season_simulator,
+            num_episodes=NUM_PPO_EPISODES,
+            eval_interval=PPO_EVAL_INTERVAL,
+            save_interval=PPO_SAVE_INTERVAL,
+            save_path=ppo_models_dir
+        )
+        
+        training_time = time.time() - start_time
+        logger.info(f"PPO training completed in {training_time:.2f} seconds")
+        
+        # Save final model to the main path
+        if USE_HIERARCHICAL_PPO:
+            ppo_model.save_model(HIERARCHICAL_PPO_MODEL_PATH)
+        else:
+            ppo_model.save_model(PPO_MODEL_PATH)
+        
+        # Generate visualizations
+        try:
+            # Standard learning visualizations
+            if hasattr(ppo_model, 'generate_learning_visualizations'):
+                ppo_model.generate_learning_visualizations(output_dir=ppo_models_dir)
+            
+            # Opponent modeling visualizations if enabled
+            if OPPONENT_MODELING_ENABLED and hasattr(ppo_model, 'generate_opponent_modeling_visualizations'):
+                ppo_model.generate_opponent_modeling_visualizations(output_dir=ppo_models_dir)
+        except Exception as e:
+            logger.error(f"Error generating visualizations: {e}")
+        
+        return ppo_model, training_results
 
 
-def evaluate_ppo_model(ppo_model, projections, league_info, roster_limits, scoring_settings, output_dir, projection_models=None ):
+# def evaluate_ppo_model(ppo_model, projections, league_info, roster_limits, scoring_settings, output_dir, projection_models=None):
+#     """
+#     Evaluate the PPO model with multiple draft simulations including opponent modeling
+    
+#     Parameters:
+#     -----------
+#     ppo_model : PPODrafter
+#         Trained PPO model
+#     projections : dict
+#         Dictionary of player projections by position
+#     league_info : dict
+#         Dictionary containing league information
+#     roster_limits : dict
+#         Dictionary of roster position limits
+#     scoring_settings : dict
+#         Dictionary of scoring settings
+#     output_dir : str
+#         Directory to save evaluation results
+#     projection_models : dict, optional
+#         Dictionary of projection models by position
+        
+#     Returns:
+#     --------
+#     dict
+#         Evaluation results
+#     """
+#     logger.info("Evaluating PPO model...")
+    
+#     # Create output directory
+#     eval_dir = os.path.join(output_dir, 'ppo_evaluation')
+#     os.makedirs(eval_dir, exist_ok=True)
+    
+#     # If no projection models provided, load them
+#     if projection_models is None:
+#         projection_loader = ProjectionModelLoader()
+#         projection_models = projection_loader.models
+    
+#     # Extract league size
+#     league_size = league_info.get('league_info', {}).get('team_count', 10)
+    
+#     # Number of trials to run
+#     num_trials = 20
+    
+#     # Prepare baseline values for VBD
+#     baseline_indices = {
+#         "QB": league_size,
+#         "RB": league_size * 2 + 2,
+#         "WR": league_size * 2 + 2,
+#         "TE": league_size,
+#         "K": league_size,
+#         "DST": league_size
+#     }
+    
+#     # Calculate baseline values
+#     vbd_baseline = {}
+#     for position, df in projections.items():
+#         pos = position.upper()
+#         if df is not None and not df.empty and "projected_points" in df.columns:
+#             sorted_df = df.sort_values("projected_points", ascending=False)
+#             index = baseline_indices.get(pos, 0)
+#             if index < len(sorted_df):
+#                 vbd_baseline[pos] = sorted_df.iloc[index]["projected_points"]
+#             else:
+#                 vbd_baseline[pos] = sorted_df.iloc[-1]["projected_points"] if not sorted_df.empty else 0
+    
+#     # Results tracking
+#     rewards = []
+#     ranks = []
+#     win_rates = {}
+    
+#     # Additional opponent modeling metrics if enabled
+#     opponent_metrics = {
+#         'prediction_accuracy': [],
+#         'value_cliff_usage': [],
+#         'position_run_detection': []
+#     }
+    
+#     # Run trials
+#     for trial in range(num_trials):
+#         logger.info(f"Running evaluation trial {trial+1}/{num_trials}")
+        
+#         # Load fresh players for each trial
+#         all_players = DraftSimulator.load_players_from_projections(projections, vbd_baseline)
+        
+#         # Create draft simulator
+#         draft_simulator = DraftSimulator(
+#             players=all_players,
+#             league_size=league_size,
+#             roster_limits=roster_limits,
+#             num_rounds=18,
+#             scoring_settings=scoring_settings,
+#             user_pick=None,
+#             projection_models=projection_models 
+#         )
+        
+#         # Get starter limits if available in scoring settings
+#         starter_limits = {}
+#         if scoring_settings and 'starter_limits' in scoring_settings:
+#             starter_limits = scoring_settings['starter_limits']
+        
+#         # Find or create a team that will use PPO
+#         ppo_team = None
+#         for team in draft_simulator.teams:
+#             if team.strategy == "RL":
+#                 team.strategy = "PPO"  # Rename to PPO
+#                 ppo_team = team
+#                 break
+        
+#         if not ppo_team:
+#             # If no suitable team found, set the first team to use PPO
+#             ppo_team = random.choice(draft_simulator.teams)
+#             ppo_team.strategy = "PPO"
+        
+#         # Track opponent modeling metrics for this trial
+#         trial_predictions = []
+#         trial_cliff_decisions = []
+#         trial_run_decisions = []
+        
+#         # Run draft simulation
+#         current_round = 1
+#         current_pick = 1
+        
+#         # For opponent modeling, predict the next few picks
+#         predicted_picks = {}  # {pick_number: predicted_position}
+        
+#         # Run until draft completion
+#         while current_round <= draft_simulator.num_rounds:
+#             # Determine team picking
+#             team_idx = (current_pick - 1) % draft_simulator.league_size
+#             if current_round % 2 == 0:  # Snake draft
+#                 team_idx = draft_simulator.league_size - 1 - team_idx
+            
+#             team = draft_simulator.teams[team_idx]
+            
+#             # If this is the PPO team, use our model in evaluation mode
+#             if team.strategy == "PPO":
+#                 # Get available players
+#                 available_players = [p for p in draft_simulator.players if not p.is_drafted]
+                
+#                 # Create state with opponent modeling if enabled
+#                 if hasattr(ppo_model, 'opponent_modeling_enabled') and ppo_model.opponent_modeling_enabled:
+#                     state = DraftState(
+#                         team=team,
+#                         available_players=available_players,
+#                         round_num=current_round,
+#                         overall_pick=current_pick,
+#                         league_size=draft_simulator.league_size,
+#                         roster_limits=draft_simulator.roster_limits,
+#                         max_rounds=draft_simulator.num_rounds,
+#                         projection_models=projection_models,
+#                         use_top_n_features=getattr(ppo_model, 'use_top_n_features', 0),
+#                         all_teams=draft_simulator.teams,
+#                         starter_limits=starter_limits
+#                     )
+                    
+#                     # Check for value cliffs
+#                     if hasattr(state, 'value_cliffs'):
+#                         for position in ["QB", "RB", "WR", "TE"]:
+#                             if position in state.value_cliffs:
+#                                 cliff_info = state.value_cliffs[position]
+                                
+#                                 if cliff_info.get('has_cliff', False) and cliff_info.get('first_cliff_position', 10) == 0:
+#                                     # Found a position with an immediate cliff
+#                                     trial_cliff_decisions.append({
+#                                         "pick": current_pick,
+#                                         "position": position,
+#                                         "cliff_magnitude": cliff_info.get('first_cliff_magnitude', 0)
+#                                     })
+                    
+#                     # Check for position runs
+#                     if hasattr(state, 'position_runs'):
+#                         for position, run_info in state.position_runs.items():
+#                             if run_info.get('is_run', False):
+#                                 # Found a position with an active run
+#                                 trial_run_decisions.append({
+#                                     "pick": current_pick,
+#                                     "position": position,
+#                                     "run_percentage": run_info.get('run_percentage', 0)
+#                                 })
+                    
+#                     # Predict opponent picks
+#                     for future_pick in range(current_pick + 1, current_pick + 8):
+#                         # Only predict for picks before our next turn
+#                         if future_pick < current_pick + state.picks_until_next_turn:
+#                             # Find the team picking at this position
+#                             future_round = (future_pick - 1) // draft_simulator.league_size + 1
+#                             future_pick_in_round = (future_pick - 1) % draft_simulator.league_size
+                            
+#                             # Determine if this round is ascending or descending
+#                             future_is_ascending = (future_round % 2 == 1)
+                            
+#                             # Calculate team index
+#                             if future_is_ascending:
+#                                 future_team_idx = future_pick_in_round
+#                             else:
+#                                 future_team_idx = draft_simulator.league_size - 1 - future_pick_in_round
+                            
+#                             # Get the team at this position
+#                             future_team = None
+#                             for t in draft_simulator.teams:
+#                                 if t.draft_position == future_team_idx + 1:  # Convert to 1-indexed
+#                                     future_team = t
+#                                     break
+                            
+#                             if future_team:
+#                                 # Use opponent needs to predict position
+#                                 opponent_needs = state.opponent_needs.get(future_team.name, {})
+                                
+#                                 # Determine most likely position target
+#                                 max_urgency = 0
+#                                 predicted_position = None
+                                
+#                                 for position, need_info in opponent_needs.items():
+#                                     if position in ["QB", "RB", "WR", "TE", "K", "DST"]:
+#                                         urgency = need_info.get('urgency', 0) * need_info.get('remaining', 0)
+                                        
+#                                         if urgency > max_urgency:
+#                                             max_urgency = urgency
+#                                             predicted_position = position
+                                
+#                                 # Record the prediction
+#                                 if predicted_position:
+#                                     predicted_picks[future_pick] = predicted_position
+#                 else:
+#                     # Create regular state without opponent modeling
+#                     state = DraftState(
+#                         team=team,
+#                         available_players=available_players,
+#                         round_num=current_round,
+#                         overall_pick=current_pick,
+#                         league_size=draft_simulator.league_size,
+#                         roster_limits=draft_simulator.roster_limits,
+#                         max_rounds=draft_simulator.num_rounds,
+#                         projection_models=projection_models,
+#                         use_top_n_features=getattr(ppo_model, 'use_top_n_features', 0)
+#                     )
+                
+#                 # Select action (without training)
+#                 action, _, _ = ppo_model.select_action(state, training=False)
+                
+#                 # Execute action
+#                 if action is not None and action < len(state.valid_players):
+#                     player = state.valid_players[action]
+#                     team.add_player(player, current_round, current_pick)
+#                 else:
+#                     # Fallback to best available
+#                     draft_simulator._make_pick(team, current_round, current_pick)
+#             else:
+#                 # Use simulator's strategy
+#                 picked_player = draft_simulator._make_pick(team, current_round, current_pick)
+                
+#                 # Check if we predicted this pick
+#                 if current_pick in predicted_picks and picked_player:
+#                     predicted_position = predicted_picks[current_pick]
+#                     actual_position = picked_player.position
+                    
+#                     # Record prediction accuracy
+#                     prediction_correct = (predicted_position == actual_position)
+                    
+#                     # Track prediction
+#                     trial_predictions.append({
+#                         "pick": current_pick,
+#                         "predicted_position": predicted_position,
+#                         "actual_position": actual_position,
+#                         "correct": prediction_correct
+#                     })
+            
+#             # Move to next pick
+#             current_pick += 1
+#             if current_pick > current_round * draft_simulator.league_size:
+#                 current_round += 1
+                
+#             if current_pick > draft_simulator.num_rounds * draft_simulator.league_size:
+#                 break
+        
+#         # Track opponent modeling metrics
+#         if trial_predictions:
+#             correct_predictions = sum(1 for pred in trial_predictions if pred.get("correct", False))
+#             total_predictions = len(trial_predictions)
+#             prediction_accuracy = correct_predictions / max(1, total_predictions)
+#             opponent_metrics['prediction_accuracy'].append(prediction_accuracy)
+        
+#         opponent_metrics['value_cliff_usage'].append(len(trial_cliff_decisions))
+#         opponent_metrics['position_run_detection'].append(len(trial_run_decisions))
+        
+#         # Simulate season
+#         season_simulator = SeasonSimulator(
+#             teams=draft_simulator.teams,
+#             num_regular_weeks=NUM_REGULAR_WEEKS,
+#             num_playoff_teams=NUM_PLAYOFF_TEAMS,
+#             num_playoff_weeks=NUM_PLAYOFF_WEEKS,
+#             randomness=RANDOMNESS_FACTOR
+#         )
+        
+#         season_results = season_simulator.simulate_season()
+#         evaluation = SeasonEvaluator(draft_simulator.teams, season_results)
+        
+#         # Get PPO team results
+#         ppo_metrics = None
+#         for metrics in evaluation.metrics.get("PPO", {}).get("teams", []):
+#             if metrics["team_name"] == ppo_team.name:
+#                 ppo_metrics = metrics
+#                 break
+        
+#         if ppo_metrics:
+#             # Calculate reward using the same logic as in training
+#             reward = (
+#                 -1.0 * ppo_metrics["rank"] +
+#                 2.0 * ppo_metrics["wins"] +
+#                 0.02 * ppo_metrics["points_for"] +
+#                 10.0 * (1 if ppo_metrics.get("playoff_result") == "Champion" else 0) +
+#                 5.0 * (1 if ppo_metrics.get("playoff_result") in ["Runner-up", "Third Place"] else 0) +
+#                 2.0 * (1 if ppo_metrics.get("playoff_result") == "Playoff Qualification" else 0)
+#             )
+            
+#             rewards.append(reward)
+#             ranks.append(ppo_metrics["rank"])
+            
+#             logger.info(f"Trial {trial+1} - Reward: {reward:.2f}, Rank: {ppo_metrics['rank']}")
+        
+#         # Track win rates
+#         for strategy, metrics in evaluation.metrics.items():
+#             if strategy not in win_rates:
+#                 win_rates[strategy] = []
+            
+#             win_rate = metrics["avg_wins"] / (metrics["avg_wins"] + metrics.get("avg_losses", 0))
+#             win_rates[strategy].append(win_rate)
+    
+#     # Calculate average metrics
+#     avg_reward = sum(rewards) / len(rewards) if rewards else 0
+#     avg_rank = sum(ranks) / len(ranks) if ranks else 0
+#     avg_win_rates = {s: sum(rates) / len(rates) for s, rates in win_rates.items()}
+    
+#     # Calculate average opponent modeling metrics
+#     if opponent_metrics['prediction_accuracy']:
+#         avg_prediction_accuracy = sum(opponent_metrics['prediction_accuracy']) / len(opponent_metrics['prediction_accuracy'])
+#     else:
+#         avg_prediction_accuracy = 0
+    
+#     avg_cliff_usage = sum(opponent_metrics['value_cliff_usage']) / len(opponent_metrics['value_cliff_usage'])
+#     avg_run_detection = sum(opponent_metrics['position_run_detection']) / len(opponent_metrics['position_run_detection'])
+    
+#     logger.info(f"PPO Evaluation results:")
+#     logger.info(f"  Average reward: {avg_reward:.2f}")
+#     logger.info(f"  Average rank: {avg_rank:.2f}")
+#     logger.info(f"  Win rates by strategy:")
+#     for strategy, rate in avg_win_rates.items():
+#         logger.info(f"    {strategy}: {rate:.3f}")
+    
+#     # Log opponent modeling metrics if enabled
+#     if hasattr(ppo_model, 'opponent_modeling_enabled') and ppo_model.opponent_modeling_enabled:
+#         logger.info(f"  Opponent modeling metrics:")
+#         logger.info(f"    Pick prediction accuracy: {avg_prediction_accuracy:.3f}")
+#         logger.info(f"    Value cliff usage: {avg_cliff_usage:.2f} per draft")
+#         logger.info(f"    Position run detection: {avg_run_detection:.2f} per draft")
+    
+#     # Create evaluation plots
+#     # Rank distribution plot
+#     plt.figure(figsize=(10, 6))
+#     sns.histplot(ranks, bins=range(1, max(ranks) + 2), kde=True)
+#     plt.title('PPO Rank Distribution')
+#     plt.xlabel('Rank')
+#     plt.ylabel('Frequency')
+#     plt.savefig(os.path.join(eval_dir, 'rank_distribution.png'))
+    
+#     # Win rate comparison plot
+#     plt.figure(figsize=(12, 6))
+#     strategies = list(avg_win_rates.keys())
+#     win_rates_values = [avg_win_rates[s] for s in strategies]
+    
+#     plt.bar(strategies, win_rates_values)
+#     plt.title('Average Win Rate by Strategy')
+#     plt.xlabel('Strategy')
+#     plt.ylabel('Win Rate')
+#     plt.ylim(0, max(win_rates_values) * 1.2)
+    
+#     # Add win rate values on top of bars
+#     for i, v in enumerate(win_rates_values):
+#         plt.text(i, v + 0.01, f"{v:.3f}", ha='center')
+    
+#     plt.savefig(os.path.join(eval_dir, 'win_rate_comparison.png'))
+    
+#     # Create opponent modeling plots if enabled
+#     if hasattr(ppo_model, 'opponent_modeling_enabled') and ppo_model.opponent_modeling_enabled:
+#         plt.figure(figsize=(10, 6))
+        
+#         # Create bar chart for opponent modeling metrics
+#         metrics_names = ["Prediction\nAccuracy", "Value Cliff\nUsage", "Position Run\nDetection"]
+#         metrics_values = [avg_prediction_accuracy, avg_cliff_usage, avg_run_detection]
+        
+#         plt.bar(metrics_names, metrics_values, color=['blue', 'green', 'orange'])
+#         plt.title('Opponent Modeling Metrics')
+#         plt.ylabel('Value')
+        
+#         # Add values on top of bars
+#         for i, v in enumerate(metrics_values):
+#             plt.text(i, v + 0.02, f"{v:.3f}", ha='center')
+        
+#         plt.savefig(os.path.join(eval_dir, 'opponent_modeling_metrics.png'))
+    
+#     # Save results to JSON
+#     results = {
+#         'avg_reward': avg_reward,
+#         'avg_rank': avg_rank,
+#         'avg_win_rates': avg_win_rates,
+#         'ranks': ranks,
+#         'rewards': rewards
+#     }
+    
+#     # Add opponent modeling metrics if enabled
+#     if hasattr(ppo_model, 'opponent_modeling_enabled') and ppo_model.opponent_modeling_enabled:
+#         results['opponent_modeling'] = {
+#             'avg_prediction_accuracy': avg_prediction_accuracy,
+#             'avg_cliff_usage': avg_cliff_usage,
+#             'avg_run_detection': avg_run_detection
+#         }
+    
+#     with open(os.path.join(eval_dir, 'evaluation_results.json'), 'w') as f:
+#         # Convert numpy arrays to lists for JSON serialization
+#         for key, value in results.items():
+#             if isinstance(value, np.ndarray):
+#                 results[key] = value.tolist()
+#             elif isinstance(value, dict):
+#                 for k, v in value.items():
+#                     if isinstance(v, np.ndarray):
+#                         results[key][k] = v.tolist()
+        
+#         json.dump(results, f, indent=2)
+    
+#     plt.close('all')  # Close all figures to free memory
+    
+#     return results
+
+def evaluate_ppo_model(ppo_model, projections, league_info, roster_limits, scoring_settings, output_dir, projection_models=None):
     """
-    Evaluate the PPO model with multiple draft simulations
+    Evaluate the PPO model with multiple draft simulations including opponent modeling
     
     Parameters:
     -----------
-    ppo_model : PPODrafter
+    ppo_model : PPODrafter or HierarchicalPPODrafter
         Trained PPO model
     projections : dict
         Dictionary of player projections by position
@@ -1299,21 +1953,27 @@ def evaluate_ppo_model(ppo_model, projections, league_info, roster_limits, scori
         Dictionary of scoring settings
     output_dir : str
         Directory to save evaluation results
+    projection_models : dict, optional
+        Dictionary of projection models by position
         
     Returns:
     --------
     dict
         Evaluation results
     """
-    logger.info("Evaluating PPO model...")
+    # Determine if we're using hierarchical PPO
+    is_hierarchical = isinstance(ppo_model, HierarchicalPPODrafter)
+    logger.info(f"Evaluating {'hierarchical' if is_hierarchical else 'standard'} PPO model...")
     
     # Create output directory
     eval_dir = os.path.join(output_dir, 'ppo_evaluation')
     os.makedirs(eval_dir, exist_ok=True)
+    
     # If no projection models provided, load them
     if projection_models is None:
         projection_loader = ProjectionModelLoader()
         projection_models = projection_loader.models
+    
     # Extract league size
     league_size = league_info.get('league_info', {}).get('team_count', 10)
     
@@ -1330,7 +1990,7 @@ def evaluate_ppo_model(ppo_model, projections, league_info, roster_limits, scori
         "DST": league_size
     }
     
-    # Calculate baseline values
+    # Calculate baseline values and prepare for simulation
     vbd_baseline = {}
     for position, df in projections.items():
         pos = position.upper()
@@ -1346,6 +2006,13 @@ def evaluate_ppo_model(ppo_model, projections, league_info, roster_limits, scori
     rewards = []
     ranks = []
     win_rates = {}
+    
+    # Additional opponent modeling metrics if enabled
+    opponent_metrics = {
+        'prediction_accuracy': [],
+        'value_cliff_usage': [],
+        'position_run_detection': []
+    }
     
     # Run trials
     for trial in range(num_trials):
@@ -1365,6 +2032,11 @@ def evaluate_ppo_model(ppo_model, projections, league_info, roster_limits, scori
             projection_models=projection_models 
         )
         
+        # Get starter limits if available in scoring settings
+        starter_limits = {}
+        if scoring_settings and 'starter_limits' in scoring_settings:
+            starter_limits = scoring_settings['starter_limits']
+        
         # Find or create a team that will use PPO
         ppo_team = None
         for team in draft_simulator.teams:
@@ -1378,9 +2050,17 @@ def evaluate_ppo_model(ppo_model, projections, league_info, roster_limits, scori
             ppo_team = random.choice(draft_simulator.teams)
             ppo_team.strategy = "PPO"
         
+        # Track opponent modeling metrics for this trial
+        trial_predictions = []
+        trial_cliff_decisions = []
+        trial_run_decisions = []
+        
         # Run draft simulation
         current_round = 1
         current_pick = 1
+        
+        # For opponent modeling, predict the next few picks
+        predicted_picks = {}  # {pick_number: predicted_position}
         
         # Run until draft completion
         while current_round <= draft_simulator.num_rounds:
@@ -1396,7 +2076,7 @@ def evaluate_ppo_model(ppo_model, projections, league_info, roster_limits, scori
                 # Get available players
                 available_players = [p for p in draft_simulator.players if not p.is_drafted]
                 
-                # Create state
+                # Create state with opponent modeling if enabled
                 state = DraftState(
                     team=team,
                     available_players=available_players,
@@ -1405,38 +2085,113 @@ def evaluate_ppo_model(ppo_model, projections, league_info, roster_limits, scori
                     league_size=draft_simulator.league_size,
                     roster_limits=draft_simulator.roster_limits,
                     max_rounds=draft_simulator.num_rounds,
+                    projection_models=projection_models,
+                    use_top_n_features=getattr(ppo_model, 'use_top_n_features', 0),
+                    all_teams=draft_simulator.teams,
+                    starter_limits=starter_limits
                 )
                 
-                # Select action (without training)
-                action, _, _ = ppo_model.select_action(state, training=False)
+                # Track opponent modeling metrics
+                if hasattr(ppo_model, 'opponent_modeling_enabled') and ppo_model.opponent_modeling_enabled:
+                    # Check for value cliffs
+                    if hasattr(state, 'value_cliffs'):
+                        for position in ["QB", "RB", "WR", "TE"]:
+                            if position in state.value_cliffs:
+                                cliff_info = state.value_cliffs[position]
+                                
+                                if cliff_info.get('has_cliff', False) and cliff_info.get('first_cliff_position', 10) == 0:
+                                    # Found a position with an immediate cliff
+                                    trial_cliff_decisions.append({
+                                        "pick": current_pick,
+                                        "position": position,
+                                        "cliff_magnitude": cliff_info.get('first_cliff_magnitude', 0)
+                                    })
+                    
+                    # Check for position runs
+                    if hasattr(state, 'position_runs'):
+                        for position, run_info in state.position_runs.items():
+                            if run_info.get('is_run', False):
+                                # Found a position with an active run
+                                trial_run_decisions.append({
+                                    "pick": current_pick,
+                                    "position": position,
+                                    "run_percentage": run_info.get('run_percentage', 0)
+                                })
                 
-                # Execute action
-                if action is not None and action < len(state.valid_players):
-                    player = state.valid_players[action]
-                    team.add_player(player, current_round, current_pick)
+                # Select action based on model type (hierarchical or standard)
+                if is_hierarchical:
+                    # Hierarchical PPO returns position, action, pos_prob, action_prob, value, features
+                    selected_position, action, pos_prob, action_prob, value, features = ppo_model.select_action(state, training=False)
+                    
+                    # Execute action if valid
+                    if selected_position is not None and action is not None and action < len(state.valid_players):
+                        player = state.valid_players[action]
+                        team.add_player(player, current_round, current_pick)
+                    else:
+                        # Fallback to best available
+                        action = None  # Set action to None to trigger fallback
                 else:
+                    # Standard PPO returns action, prob, value, features
+                    action, prob, value, features = ppo_model.select_action(state, training=False)
+                    
+                    # Execute action if valid
+                    if action is not None and action < len(state.valid_players):
+                        player = state.valid_players[action]
+                        team.add_player(player, current_round, current_pick)
+                
+                # If action is None or invalid, fall back to best available
+                if action is None or (is_hierarchical and selected_position is None):
                     # Fallback to best available
-                    draft_simulator._make_pick(team, current_round, current_pick)
+                    valid_players = [p for p in available_players if p.position in 
+                                     [pos for pos in draft_simulator.roster_limits.keys() 
+                                      if team.can_draft_position(pos)]]
+                    
+                    if valid_players:
+                        # Sort by projected points
+                        valid_players.sort(key=lambda p: p.projected_points, reverse=True)
+                        player = valid_players[0]
+                        team.add_player(player, current_round, current_pick)
+                        logger.info(f"Fallback draft: {player.name} ({player.position})")
+            
+            # Otherwise, use the team's strategy
             else:
-                # Use simulator's strategy
-                draft_simulator._make_pick(team, current_round, current_pick)
+                # Make the pick using the team's strategy
+                picked_player = draft_simulator._make_pick(team, current_round, current_pick)
+                
+                # Validate opponent pick prediction if we made one
+                if current_pick in predicted_picks and picked_player:
+                    predicted_position = predicted_picks[current_pick]
+                    actual_position = picked_player.position
+                    
+                    # Record prediction accuracy
+                    prediction_correct = (predicted_position == actual_position)
+                    
+                    # Track prediction
+                    prediction_data = {
+                        "pick": current_pick,
+                        "predicted_position": predicted_position,
+                        "actual_position": actual_position,
+                        "correct": prediction_correct
+                    }
+                    trial_predictions.append(prediction_data)
             
             # Move to next pick
             current_pick += 1
             if current_pick > current_round * draft_simulator.league_size:
                 current_round += 1
+                
+            if current_pick > draft_simulator.num_rounds * draft_simulator.league_size:
+                break
         
-        # Use LineupEvaluator instead of SeasonSimulator
-        # lineup_evaluator = LineupEvaluator(
-        #     teams=draft_simulator.teams,
-        #     num_weeks=17,
-        #     randomness=0.2,
-        #     injury_chance=0.05
-        # )
-        # lineup_results = lineup_evaluator.evaluate_teams()
+        # Track opponent modeling metrics
+        if trial_predictions:
+            correct_predictions = sum(1 for pred in trial_predictions if pred.get("correct", False))
+            total_predictions = len(trial_predictions)
+            prediction_accuracy = correct_predictions / max(1, total_predictions)
+            opponent_metrics['prediction_accuracy'].append(prediction_accuracy)
         
-        # # Use SeasonEvaluator with lineup results
-        # evaluation = SeasonEvaluator(draft_simulator.teams, lineup_results)
+        opponent_metrics['value_cliff_usage'].append(len(trial_cliff_decisions))
+        opponent_metrics['position_run_detection'].append(len(trial_run_decisions))
         
         # Simulate season
         season_simulator = SeasonSimulator(
@@ -1449,9 +2204,10 @@ def evaluate_ppo_model(ppo_model, projections, league_info, roster_limits, scori
         
         season_results = season_simulator.simulate_season()
         evaluation = SeasonEvaluator(draft_simulator.teams, season_results)
+        
         # Get PPO team results
         ppo_metrics = None
-        for metrics in evaluation.metrics["PPO"]["teams"]:
+        for metrics in evaluation.metrics.get("PPO", {}).get("teams", []):
             if metrics["team_name"] == ppo_team.name:
                 ppo_metrics = metrics
                 break
@@ -1485,18 +2241,34 @@ def evaluate_ppo_model(ppo_model, projections, league_info, roster_limits, scori
     avg_rank = sum(ranks) / len(ranks) if ranks else 0
     avg_win_rates = {s: sum(rates) / len(rates) for s, rates in win_rates.items()}
     
-    logger.info(f"PPO Evaluation results:")
+    # Calculate average opponent modeling metrics
+    if opponent_metrics['prediction_accuracy']:
+        avg_prediction_accuracy = sum(opponent_metrics['prediction_accuracy']) / len(opponent_metrics['prediction_accuracy'])
+    else:
+        avg_prediction_accuracy = 0
+    
+    avg_cliff_usage = sum(opponent_metrics['value_cliff_usage']) / len(opponent_metrics['value_cliff_usage'])
+    avg_run_detection = sum(opponent_metrics['position_run_detection']) / len(opponent_metrics['position_run_detection'])
+    
+    logger.info(f"{'Hierarchical' if is_hierarchical else 'Standard'} PPO Evaluation results:")
     logger.info(f"  Average reward: {avg_reward:.2f}")
     logger.info(f"  Average rank: {avg_rank:.2f}")
     logger.info(f"  Win rates by strategy:")
     for strategy, rate in avg_win_rates.items():
         logger.info(f"    {strategy}: {rate:.3f}")
     
+    # Log opponent modeling metrics if enabled
+    if hasattr(ppo_model, 'opponent_modeling_enabled') and ppo_model.opponent_modeling_enabled:
+        logger.info(f"  Opponent modeling metrics:")
+        logger.info(f"    Pick prediction accuracy: {avg_prediction_accuracy:.3f}")
+        logger.info(f"    Value cliff usage: {avg_cliff_usage:.2f} per draft")
+        logger.info(f"    Position run detection: {avg_run_detection:.2f} per draft")
+    
     # Create evaluation plots
     # Rank distribution plot
     plt.figure(figsize=(10, 6))
     sns.histplot(ranks, bins=range(1, max(ranks) + 2), kde=True)
-    plt.title('PPO Rank Distribution')
+    plt.title(f"{'Hierarchical' if is_hierarchical else 'Standard'} PPO Rank Distribution")
     plt.xlabel('Rank')
     plt.ylabel('Frequency')
     plt.savefig(os.path.join(eval_dir, 'rank_distribution.png'))
@@ -1520,12 +2292,21 @@ def evaluate_ppo_model(ppo_model, projections, league_info, roster_limits, scori
     
     # Save results to JSON
     results = {
+        'model_type': 'hierarchical' if is_hierarchical else 'standard',
         'avg_reward': avg_reward,
         'avg_rank': avg_rank,
         'avg_win_rates': avg_win_rates,
         'ranks': ranks,
         'rewards': rewards
     }
+    
+    # Add opponent modeling metrics if enabled
+    if hasattr(ppo_model, 'opponent_modeling_enabled') and ppo_model.opponent_modeling_enabled:
+        results['opponent_modeling'] = {
+            'avg_prediction_accuracy': avg_prediction_accuracy,
+            'avg_cliff_usage': avg_cliff_usage,
+            'avg_run_detection': avg_run_detection
+        }
     
     with open(os.path.join(eval_dir, 'evaluation_results.json'), 'w') as f:
         # Convert numpy arrays to lists for JSON serialization
@@ -1539,7 +2320,316 @@ def evaluate_ppo_model(ppo_model, projections, league_info, roster_limits, scori
         
         json.dump(results, f, indent=2)
     
+    plt.close('all')  # Close all figures to free memory
+    
     return results
+
+
+def run_draft_simulations(projections, league_info, roster_limits, scoring_settings, ppo_model=None, results_dir=None):
+    """
+    Run draft simulations with opponent modeling
+    
+    Parameters:
+    -----------
+    projections : dict
+        Dictionary of player projections by position
+    league_info : dict
+        Dictionary containing league information
+    roster_limits : dict
+        Dictionary of roster position limits
+    scoring_settings : dict
+        Dictionary of scoring settings
+    ppo_model : PPODrafter
+        PPO model to use for RL strategy (if None, use baseline strategies)
+    results_dir : str
+        Directory to save results
+        
+    Returns:
+    --------
+    dict
+        Dictionary of simulation results
+    """
+    
+    logger.info("Running draft simulations...")
+    
+    # Ensure results directory exists
+    if results_dir:
+        os.makedirs(results_dir, exist_ok=True)
+    
+    # Extract league size
+    league_size = league_info.get('league_info', {}).get('team_count', 10)
+    
+    # Prepare baseline values for VBD
+    baseline_indices = {
+        "QB": league_size,  # Last starting QB
+        "RB": league_size * 2 + 2,  # Last starting RB including 2 FLEX
+        "WR": league_size * 2 + 2,  # Last starting WR including 2 FLEX
+        "TE": league_size,  # Last starting TE
+        "K": league_size,  # Last starting K
+        "DST": league_size  # Last starting DST
+    }
+    
+    # Calculate baseline values
+    vbd_baseline = {}
+    for position, df in projections.items():
+        pos = position.upper()
+        if df is not None and not df.empty and "projected_points" in df.columns:
+            # Sort by projected points
+            sorted_df = df.sort_values("projected_points", ascending=False)
+            
+            # Get the baseline player
+            index = baseline_indices.get(pos, 0)
+            if index < len(sorted_df):
+                vbd_baseline[pos] = sorted_df.iloc[index]["projected_points"]
+            else:
+                # If not enough players, use the last player's points
+                vbd_baseline[pos] = sorted_df.iloc[-1]["projected_points"] if not sorted_df.empty else 0
+    
+    # Load players from projections
+    all_players = DraftSimulator.load_players_from_projections(projections, vbd_baseline)
+    
+    # Log players loaded by position
+    position_counts = {}
+    for player in all_players:
+        position_counts[player.position] = position_counts.get(player.position, 0) + 1
+    
+    logger.info(f"Loaded {len(all_players)} players for draft simulation:")
+    for pos, count in position_counts.items():
+        logger.info(f"  {pos}: {count} players")
+    
+    # Results containers
+    all_teams = []
+    all_draft_histories = []
+    strategy_metrics = {strategy: [] for strategy in DRAFT_STRATEGIES_TO_TEST}
+    
+    # Create a new dictionary to track performance against different opponent types
+    opponent_type_performance = {}
+    
+    # Get starter limits if available in scoring settings
+    starter_limits = {}
+    if scoring_settings and 'starter_limits' in scoring_settings:
+        starter_limits = scoring_settings['starter_limits']
+    
+    # Run simulations
+    for sim in range(NUM_DRAFT_SIMULATIONS):
+        logger.info(f"Running draft simulation {sim+1}/{NUM_DRAFT_SIMULATIONS}")
+        
+        # Create a fresh deep copy of players for each simulation
+        fresh_players = copy.deepcopy(all_players)
+        
+        # Reset draft status for all players
+        for player in fresh_players:
+            player.is_drafted = False
+            player.drafted_round = None
+            player.drafted_pick = None
+            player.drafted_team = None
+            
+            # Add some randomness to projected points (within a small range) 
+            # to create variety between simulations
+            variation = random.uniform(0.95, 1.05)  # 5% variation
+            player.projected_points = player.projected_points * variation
+        
+        # Create simulator with the fresh players
+        draft_sim = DraftSimulator(
+            players=fresh_players,
+            league_size=league_size,
+            roster_limits=roster_limits,
+            num_rounds=sum(roster_limits.values()),
+            scoring_settings=scoring_settings,
+            user_pick=USER_DRAFT_POSITION
+        )
+        
+        # Inject PPO model if available
+        if ppo_model is not None:
+            # Replace "RL" strategy with "PPO" strategy
+            for team in draft_sim.teams:
+                if team.strategy == "RL":
+                    team.strategy = "PPO"
+            
+            # Rename strategy in metrics tracking
+            if "RL" in strategy_metrics and "PPO" not in strategy_metrics:
+                strategy_metrics["PPO"] = strategy_metrics.pop("RL")
+        
+        # Run draft
+        teams, draft_history = draft_sim.run_draft(ppo_model=ppo_model)
+        
+        # Reset random seed for next simulation
+        random.seed(time.time() + sim)
+        
+        # Store results
+        all_teams.append(teams)
+        all_draft_histories.append(draft_history)
+        
+        # Generate draft report
+        if results_dir:
+            report_path = os.path.join(results_dir, f"draft_simulation_{sim+1}.csv")
+            draft_sim.create_draft_report(output_path=report_path)
+        
+        # Record which teams are using which strategies
+        team_strategies = {team.name: team.strategy for team in draft_sim.teams}
+        
+        # Calculate metrics by strategy
+        for team in teams:
+            if team.strategy in strategy_metrics:
+                strategy_metrics[team.strategy].append({
+                    "total_points": team.get_total_projected_points(),
+                    "starting_points": team.get_starting_lineup_points(),
+                    "team_name": team.name,
+                    "draft_position": team.draft_position,
+                    "opponent_strategies": [s for s in team_strategies.values() if s != team.strategy]
+                })
+            
+            # If opponent modeling is enabled and we're using a PPO model,
+            # track performance against different opponent types
+            if team.strategy == "PPO" and ppo_model and hasattr(ppo_model, 'opponent_modeling_enabled') and ppo_model.opponent_modeling_enabled:
+                ppo_metrics = {
+                    "total_points": team.get_total_projected_points(),
+                    "starting_points": team.get_starting_lineup_points(),
+                    "team_name": team.name,
+                    "draft_position": team.draft_position,
+                    "opponent_strategies": [s for s in team_strategies.values() if s != "PPO"]
+                }
+                
+                # Track PPO performance against each strategy
+                for strategy in set(team_strategies.values()):
+                    if strategy != "PPO":
+                        if strategy not in opponent_type_performance:
+                            opponent_type_performance[strategy] = []
+                        
+                        opponent_type_performance[strategy].append(ppo_metrics)
+    
+    # Aggregate metrics
+    summary = {}
+    
+    for strategy, metrics in strategy_metrics.items():
+        if not metrics:
+            continue
+            
+        # Calculate averages
+        avg_total = sum(m["total_points"] for m in metrics) / len(metrics)
+        avg_starters = sum(m["starting_points"] for m in metrics) / len(metrics)
+        
+        summary[strategy] = {
+            "avg_total_points": avg_total,
+            "avg_starter_points": avg_starters,
+            "num_simulations": len(metrics),
+            "details": metrics
+        }
+    
+    # Create a summary DataFrame
+    summary_df = pd.DataFrame([
+        {
+            "Strategy": strategy,
+            "Avg Total Points": data["avg_total_points"],
+            "Avg Starter Points": data["avg_starter_points"],
+            "Simulations": data["num_simulations"]
+        }
+        for strategy, data in summary.items()
+    ])
+    
+    # Analyze opponent type performance if available
+    opponent_df = None
+    if opponent_type_performance:
+        opponent_summary = {}
+        
+        for strategy, metrics_list in opponent_type_performance.items():
+            avg_total = sum(m["total_points"] for m in metrics_list) / max(1, len(metrics_list))
+            avg_starters = sum(m["starting_points"] for m in metrics_list) / max(1, len(metrics_list))
+            
+            opponent_summary[strategy] = {
+                "avg_total_points": avg_total,
+                "avg_starter_points": avg_starters,
+                "num_simulations": len(metrics_list)
+            }
+        
+        # Create opponent comparison DataFrame
+        opponent_df = pd.DataFrame([
+            {
+                "Opponent Type": strategy,
+                "Avg Total Points": data["avg_total_points"],
+                "Avg Starter Points": data["avg_starter_points"],
+                "Simulations": data["num_simulations"]
+            }
+            for strategy, data in opponent_summary.items()
+        ])
+        
+        # Save opponent summary
+        if results_dir:
+            opponent_summary_path = os.path.join(results_dir, "opponent_strategy_comparison.csv")
+            opponent_df.to_csv(opponent_summary_path, index=False)
+            
+            # Create visualization
+            plt.figure(figsize=(12, 8))
+            
+            # Plot average starter points by opponent type
+            ax = sns.barplot(
+                x="Opponent Type", 
+                y="Avg Starter Points", 
+                data=opponent_df, 
+                palette="viridis"
+            )
+            
+            # Add data labels
+            for i, row in enumerate(opponent_df.itertuples()):
+                ax.text(
+                    i, 
+                    row._3 + 5,  # Add a small offset
+                    f"{row._3:.1f}",
+                    ha='center'
+                )
+            
+            plt.title("PPO Performance Against Different Opponent Types")
+            plt.grid(axis='y', linestyle='--', alpha=0.7)
+            
+            # Save figure
+            plt.tight_layout()
+            plt.savefig(os.path.join(results_dir, "opponent_strategy_comparison.png"), dpi=300)
+            plt.close()
+        
+        # Add to summary dictionary
+        summary["opponent_analysis"] = opponent_summary
+    
+    # Save summary
+    if results_dir:
+        summary_path = os.path.join(results_dir, "draft_summary.csv")
+        summary_df.to_csv(summary_path, index=False)
+        
+        # Create visualization
+        plt.figure(figsize=(12, 8))
+        
+        # Plot average starter points by strategy
+        ax = sns.barplot(
+            x="Strategy", 
+            y="Avg Starter Points", 
+            data=summary_df, 
+            palette="viridis"
+        )
+        
+        # Add data labels
+        for i, row in enumerate(summary_df.itertuples()):
+            ax.text(
+                i, 
+                row._3 + 5,  # Add a small offset
+                f"{row._3:.1f}",
+                ha='center'
+            )
+        
+        plt.title("Average Starter Points by Draft Strategy")
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        
+        # Save figure
+        plt.tight_layout()
+        plt.savefig(os.path.join(results_dir, "draft_strategy_comparison.png"), dpi=300)
+        plt.close()
+    
+    # Return summary
+    return {
+        "summary": summary,
+        "summary_df": summary_df,
+        "opponent_df": opponent_df,
+        "teams": all_teams,
+        "draft_histories": all_draft_histories
+    }
 
 def load_league_settings(league_id, year, espn_s2, swid):
     """Load league settings from ESPN API or config file"""
@@ -1586,39 +2676,39 @@ def load_league_settings(league_id, year, espn_s2, swid):
     # Only as a last resort, use minimal defaults
     logger.error("Could not load league settings from API or config file. Using minimal defaults.")
     
-    # Create minimal league data with defaults
-    league_data = {
-        "league_info": {
-            "name": "Default League",
-            "team_count": 10,
-            "playoff_teams": 6
-        }
-    }
+    # # Create minimal league data with defaults
+    # league_data = {
+    #     "league_info": {
+    #         "name": "Default League",
+    #         "team_count": 10,
+    #         "playoff_teams": 6
+    #     }
+    # }
     
     # These should be replaced with API data, we only include defaults as a fallback
-    roster_limits = {
-        "QB": 3,
-        "RB": 10,
-        "WR": 10,
-        "TE": 2,
-        "FLEX": 10,
-        "D/ST": 10,
-        "K": 10,
-        "BE": 8,
-        "IR": 1
-    }
+    # roster_limits = {
+    #     "QB": 3,
+    #     "RB": 10,
+    #     "WR": 10,
+    #     "TE": 2,
+    #     "FLEX": 10,
+    #     "D/ST": 10,
+    #     "K": 10,
+    #     "BE": 8,
+    #     "IR": 1
+    # }
     
-    scoring_settings = {
-        "passing_yards": 0.04,
-        "passing_td": 4,
-        "interception": -2,
-        "rushing_yards": 0.1,
-        "rushing_td": 6,
-        "receiving_yards": 0.1,
-        "receiving_td": 6,
-        "reception": 0.5,
-        "fumble_lost": -2
-    }
+    # scoring_settings = {
+    #     "passing_yards": 0.04,
+    #     "passing_td": 4,
+    #     "interception": -2,
+    #     "rushing_yards": 0.1,
+    #     "rushing_td": 6,
+    #     "receiving_yards": 0.1,
+    #     "receiving_td": 6,
+    #     "reception": 0.5,
+    #     "fumble_lost": -2
+    # }
     
     return league_data, roster_limits, scoring_settings
 
@@ -1942,9 +3032,13 @@ def main():
         
         logger.info(f"PPO model training and evaluation complete")
     elif USE_EXISTING_PPO_MODEL:
-        logger.info(f"Loading existing PPO model from {PPO_MODEL_PATH}")
+        logger.info(f"Loading existing {'hierarchical' if USE_HIERARCHICAL_PPO else 'standard'} PPO model")
+        
         try:
-            ppo_model = PPODrafter.load_model(PPO_MODEL_PATH)
+            if USE_HIERARCHICAL_PPO:
+                ppo_model = HierarchicalPPODrafter.load_model(HIERARCHICAL_PPO_MODEL_PATH)
+            else:
+                ppo_model = PPODrafter.load_model(PPO_MODEL_PATH)
             logger.info("Successfully loaded PPO model")
         except Exception as e:
             logger.error(f"Error loading PPO model: {e}")

@@ -105,6 +105,18 @@ def load_nfl_data(years, include_ngs=True, ngs_min_year=2016, use_threads=True):
     """
     data = {}
     
+    def load_seasonal_with_retry(years, max_retries=3):
+        for attempt in range(max_retries):
+            try:
+                return nfl.import_seasonal_data(years)
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Seasonal data fetch failed (attempt {attempt+1}/{max_retries}). Retrying...")
+                    time.sleep(2)  # Wait before retrying
+                else:
+                    logger.error(f"Failed to fetch seasonal data after {max_retries} attempts: {e}")
+                    return pd.DataFrame()  # 
+    
     # Load player IDs for mapping
     logger.info("Loading player ID mapping data")
     try:
@@ -121,7 +133,7 @@ def load_nfl_data(years, include_ngs=True, ngs_min_year=2016, use_threads=True):
     # Load seasonal data
     logger.info(f"Loading seasonal data for years: {years}")
     try:
-        seasonal_data = nfl.import_seasonal_data(years)
+        seasonal_data = load_seasonal_with_retry(years)
         # Add season type column if missing
         if 'season_type' not in seasonal_data.columns:
             seasonal_data['season_type'] = 'REG'
@@ -130,6 +142,7 @@ def load_nfl_data(years, include_ngs=True, ngs_min_year=2016, use_threads=True):
     except Exception as e:
         logger.error(f"Error loading seasonal data: {e}")
         data['seasonal'] = pd.DataFrame()
+        logger.info("Continuing without season data")
     
     # Load weekly data
     logger.info(f"Loading weekly data for years: {years}")
@@ -606,7 +619,7 @@ def standardize_columns(df):
 
 def add_derived_features(seasonal_data):
     """
-    Add derived features to seasonal data
+    Add derived features to seasonal data - optimized to avoid fragmentation
     
     Parameters:
     -----------
@@ -624,13 +637,16 @@ def add_derived_features(seasonal_data):
     # Create a copy to avoid modifying the original
     df = seasonal_data.copy()
     
+    # Dictionary to store all new derived features
+    derived_features = {}
+    
     # Per game stats
     if 'games' in df.columns:
         for col in ['passing_yards', 'rushing_yards', 'receiving_yards', 
                    'passing_tds', 'rushing_tds', 'receiving_tds',
                    'targets', 'receptions', 'interceptions', 'carries', 'attempts']:
             if col in df.columns:
-                df[f'{col}_per_game'] = df[col] / df['games'].clip(lower=1)
+                derived_features[f'{col}_per_game'] = df[col] / df['games'].clip(lower=1)
     
     # Add position-specific features
     if 'position' in df.columns:
@@ -639,91 +655,150 @@ def add_derived_features(seasonal_data):
         if qb_mask.any():
             # Passing efficiency
             if all(col in df.columns for col in ['completions', 'attempts']):
-                df.loc[qb_mask, 'completion_percentage'] = (df.loc[qb_mask, 'completions'] / 
-                                                          df.loc[qb_mask, 'attempts'].clip(lower=1)) * 100
+                derived_features['completion_percentage'] = pd.Series(
+                    (df.loc[qb_mask, 'completions'] / df.loc[qb_mask, 'attempts'].clip(lower=1)) * 100,
+                    index=df.index
+                ).where(qb_mask)
             
             if all(col in df.columns for col in ['passing_yards', 'attempts']):
-                df.loc[qb_mask, 'yards_per_attempt'] = df.loc[qb_mask, 'passing_yards'] / df.loc[qb_mask, 'attempts'].clip(lower=1)
+                derived_features['yards_per_attempt'] = pd.Series(
+                    df.loc[qb_mask, 'passing_yards'] / df.loc[qb_mask, 'attempts'].clip(lower=1),
+                    index=df.index
+                ).where(qb_mask)
             
             if all(col in df.columns for col in ['passing_tds', 'attempts']):
-                df.loc[qb_mask, 'td_percentage'] = (df.loc[qb_mask, 'passing_tds'] / 
-                                                  df.loc[qb_mask, 'attempts'].clip(lower=1)) * 100
+                derived_features['td_percentage'] = pd.Series(
+                    (df.loc[qb_mask, 'passing_tds'] / df.loc[qb_mask, 'attempts'].clip(lower=1)) * 100,
+                    index=df.index
+                ).where(qb_mask)
             
             if all(col in df.columns for col in ['interceptions', 'attempts']):
-                df.loc[qb_mask, 'int_percentage'] = (df.loc[qb_mask, 'interceptions'] / 
-                                                   df.loc[qb_mask, 'attempts'].clip(lower=1)) * 100
+                derived_features['int_percentage'] = pd.Series(
+                    (df.loc[qb_mask, 'interceptions'] / df.loc[qb_mask, 'attempts'].clip(lower=1)) * 100,
+                    index=df.index
+                ).where(qb_mask)
             
             if all(col in df.columns for col in ['passing_yards', 'attempts', 'passing_tds', 'interceptions']):
                 # Advanced QB metrics
-                df.loc[qb_mask, 'adjusted_yards_per_attempt'] = ((df.loc[qb_mask, 'passing_yards'] + 
-                                                                  (20 * df.loc[qb_mask, 'passing_tds']) - 
-                                                                  (45 * df.loc[qb_mask, 'interceptions'])) / 
-                                                                df.loc[qb_mask, 'attempts'].clip(lower=1))
+                derived_features['adjusted_yards_per_attempt'] = pd.Series(
+                    ((df.loc[qb_mask, 'passing_yards'] + 
+                      (20 * df.loc[qb_mask, 'passing_tds']) - 
+                      (45 * df.loc[qb_mask, 'interceptions'])) / 
+                    df.loc[qb_mask, 'attempts'].clip(lower=1)),
+                    index=df.index
+                ).where(qb_mask)
             
             if all(col in df.columns for col in ['passing_tds', 'interceptions']):
-                df.loc[qb_mask, 'td_to_int_ratio'] = df.loc[qb_mask, 'passing_tds'] / df.loc[qb_mask, 'interceptions'].clip(lower=1)
+                derived_features['td_to_int_ratio'] = pd.Series(
+                    df.loc[qb_mask, 'passing_tds'] / df.loc[qb_mask, 'interceptions'].clip(lower=1),
+                    index=df.index
+                ).where(qb_mask)
         
         # RB features
         rb_mask = df['position'] == 'RB'
         if rb_mask.any():
             if all(col in df.columns for col in ['rushing_yards', 'carries']):
-                df.loc[rb_mask, 'yards_per_carry'] = df.loc[rb_mask, 'rushing_yards'] / df.loc[rb_mask, 'carries'].clip(lower=1)
+                derived_features['yards_per_carry'] = pd.Series(
+                    df.loc[rb_mask, 'rushing_yards'] / df.loc[rb_mask, 'carries'].clip(lower=1),
+                    index=df.index
+                ).where(rb_mask)
             
             if all(col in df.columns for col in ['rushing_tds', 'carries']):
-                df.loc[rb_mask, 'rushing_td_rate'] = (df.loc[rb_mask, 'rushing_tds'] / 
-                                                    df.loc[rb_mask, 'carries'].clip(lower=1)) * 100
+                derived_features['rushing_td_rate'] = pd.Series(
+                    (df.loc[rb_mask, 'rushing_tds'] / df.loc[rb_mask, 'carries'].clip(lower=1)) * 100,
+                    index=df.index
+                ).where(rb_mask)
             
             if all(col in df.columns for col in ['rushing_yards', 'receiving_yards']):
                 # Create total yards
-                df.loc[rb_mask, 'total_yards'] = df.loc[rb_mask, 'rushing_yards'] + df.loc[rb_mask, 'receiving_yards']
+                derived_features['total_yards'] = pd.Series(
+                    df.loc[rb_mask, 'rushing_yards'] + df.loc[rb_mask, 'receiving_yards'],
+                    index=df.index
+                ).where(rb_mask)
+                
+                # Create total_yards first, then use it for the calculations below
+                # This uses the original dataframe columns, not the new derived ones
                 
                 # Calculate yards distribution
-                df.loc[rb_mask, 'rushing_yards_percentage'] = (df.loc[rb_mask, 'rushing_yards'] / 
-                                                             df.loc[rb_mask, 'total_yards'].clip(lower=1)) * 100
-                df.loc[rb_mask, 'receiving_yards_percentage'] = (df.loc[rb_mask, 'receiving_yards'] / 
-                                                               df.loc[rb_mask, 'total_yards'].clip(lower=1)) * 100
+                derived_features['rushing_yards_percentage'] = pd.Series(
+                    (df.loc[rb_mask, 'rushing_yards'] / (df.loc[rb_mask, 'rushing_yards'] + 
+                                                       df.loc[rb_mask, 'receiving_yards']).clip(lower=1)) * 100,
+                    index=df.index
+                ).where(rb_mask)
+                
+                derived_features['receiving_yards_percentage'] = pd.Series(
+                    (df.loc[rb_mask, 'receiving_yards'] / (df.loc[rb_mask, 'rushing_yards'] + 
+                                                         df.loc[rb_mask, 'receiving_yards']).clip(lower=1)) * 100,
+                    index=df.index
+                ).where(rb_mask)
             
             if all(col in df.columns for col in ['rushing_yards', 'receiving_yards', 'carries', 'receptions']):
-                df.loc[rb_mask, 'total_yards_per_touch'] = ((df.loc[rb_mask, 'rushing_yards'] + df.loc[rb_mask, 'receiving_yards']) / 
-                                                          (df.loc[rb_mask, 'carries'] + df.loc[rb_mask, 'receptions']).clip(lower=1))
+                derived_features['total_yards_per_touch'] = pd.Series(
+                    ((df.loc[rb_mask, 'rushing_yards'] + df.loc[rb_mask, 'receiving_yards']) / 
+                    (df.loc[rb_mask, 'carries'] + df.loc[rb_mask, 'receptions']).clip(lower=1)),
+                    index=df.index
+                ).where(rb_mask)
             
             if all(col in df.columns for col in ['receptions', 'targets']):
-                df.loc[rb_mask, 'reception_ratio'] = df.loc[rb_mask, 'receptions'] / df.loc[rb_mask, 'targets'].clip(lower=1)
+                derived_features['reception_ratio'] = pd.Series(
+                    df.loc[rb_mask, 'receptions'] / df.loc[rb_mask, 'targets'].clip(lower=1),
+                    index=df.index
+                ).where(rb_mask)
         
         # WR/TE features
         wr_te_mask = df['position'].isin(['WR', 'TE'])
         if wr_te_mask.any():
             if all(col in df.columns for col in ['receiving_yards', 'receptions']):
-                df.loc[wr_te_mask, 'yards_per_reception'] = df.loc[wr_te_mask, 'receiving_yards'] / df.loc[wr_te_mask, 'receptions'].clip(lower=1)
+                derived_features['yards_per_reception'] = pd.Series(
+                    df.loc[wr_te_mask, 'receiving_yards'] / df.loc[wr_te_mask, 'receptions'].clip(lower=1),
+                    index=df.index
+                ).where(wr_te_mask)
             
             if all(col in df.columns for col in ['receiving_yards', 'targets']):
-                df.loc[wr_te_mask, 'yards_per_target'] = df.loc[wr_te_mask, 'receiving_yards'] / df.loc[wr_te_mask, 'targets'].clip(lower=1)
+                derived_features['yards_per_target'] = pd.Series(
+                    df.loc[wr_te_mask, 'receiving_yards'] / df.loc[wr_te_mask, 'targets'].clip(lower=1),
+                    index=df.index
+                ).where(wr_te_mask)
             
             if all(col in df.columns for col in ['receiving_tds', 'receptions']):
-                df.loc[wr_te_mask, 'receiving_td_rate'] = (df.loc[wr_te_mask, 'receiving_tds'] / 
-                                                         df.loc[wr_te_mask, 'receptions'].clip(lower=1)) * 100
+                derived_features['receiving_td_rate'] = pd.Series(
+                    (df.loc[wr_te_mask, 'receiving_tds'] / df.loc[wr_te_mask, 'receptions'].clip(lower=1)) * 100,
+                    index=df.index
+                ).where(wr_te_mask)
             
             if all(col in df.columns for col in ['receptions', 'targets']):
-                df.loc[wr_te_mask, 'reception_ratio'] = df.loc[wr_te_mask, 'receptions'] / df.loc[wr_te_mask, 'targets'].clip(lower=1)
+                derived_features['reception_ratio'] = pd.Series(
+                    df.loc[wr_te_mask, 'receptions'] / df.loc[wr_te_mask, 'targets'].clip(lower=1),
+                    index=df.index
+                ).where(wr_te_mask)
             
             # Advanced receiving metrics
             if all(col in df.columns for col in ['receiving_air_yards', 'receiving_yards']):
-                df.loc[wr_te_mask, 'air_yards_percentage'] = (df.loc[wr_te_mask, 'receiving_air_yards'] / 
-                                                            df.loc[wr_te_mask, 'receiving_yards'].clip(lower=1)) * 100
+                derived_features['air_yards_percentage'] = pd.Series(
+                    (df.loc[wr_te_mask, 'receiving_air_yards'] / df.loc[wr_te_mask, 'receiving_yards'].clip(lower=1)) * 100,
+                    index=df.index
+                ).where(wr_te_mask)
                 
-                df.loc[wr_te_mask, 'yac_percentage'] = 100 - df.loc[wr_te_mask, 'air_yards_percentage']
+                # Calculate air_yards_percentage first, then use it for yac_percentage
+                derived_features['yac_percentage'] = 100 - derived_features['air_yards_percentage']
             
             # RACR (Receiver Air Conversion Ratio)
             if all(col in df.columns for col in ['receiving_yards', 'receiving_air_yards']):
-                df.loc[wr_te_mask, 'racr'] = df.loc[wr_te_mask, 'receiving_yards'] / df.loc[wr_te_mask, 'receiving_air_yards'].clip(lower=1)
+                derived_features['racr'] = pd.Series(
+                    df.loc[wr_te_mask, 'receiving_yards'] / df.loc[wr_te_mask, 'receiving_air_yards'].clip(lower=1),
+                    index=df.index
+                ).where(wr_te_mask)
             
             # WOPR (Weighted Opportunity Rating)
             if all(col in df.columns for col in ['target_share', 'air_yards_share']):
-                df.loc[wr_te_mask, 'wopr'] = (1.5 * df.loc[wr_te_mask, 'target_share']) + (0.7 * df.loc[wr_te_mask, 'air_yards_share'])
+                derived_features['wopr'] = pd.Series(
+                    (1.5 * df.loc[wr_te_mask, 'target_share']) + (0.7 * df.loc[wr_te_mask, 'air_yards_share']),
+                    index=df.index
+                ).where(wr_te_mask)
     
     # Add fantasy points per game
     if 'fantasy_points' in df.columns and 'games' in df.columns:
-        df['fantasy_points_per_game'] = df['fantasy_points'] / df['games'].clip(lower=1)
+        derived_features['fantasy_points_per_game'] = df['fantasy_points'] / df['games'].clip(lower=1)
     
     # Calculate career trends (if player played multiple seasons)
     if 'season' in df.columns and 'player_id' in df.columns:
@@ -755,54 +830,63 @@ def add_derived_features(seasonal_data):
             if metric in df.columns:
                 trend_metrics.append(metric)
         
+        # Dictionary to hold all trend-related features
+        trend_features = {}
+        
         # Process each metric for trend analysis
         for col in trend_metrics:
             if col in df.columns:
                 # Previous season value
-                df[f'{col}_prev_season'] = df_shifted[col]
+                trend_features[f'{col}_prev_season'] = df_shifted[col]
                 
                 # Calculate absolute and percentage change
-                df[f'{col}_change'] = df[col] - df[f'{col}_prev_season']
+                trend_features[f'{col}_change'] = df[col] - df_shifted[col]
                 # Avoid division by zero or NaN
-                df[f'{col}_pct_change'] = df[f'{col}_change'] / df[f'{col}_prev_season'].clip(lower=0.1) * 100
+                trend_features[f'{col}_pct_change'] = (
+                    (df[col] - df_shifted[col]) / df_shifted[col].clip(lower=0.1) * 100
+                )
                 
                 # Calculate simple moving average (3 seasons) if we have enough data
                 if col in df_shifted_2.columns and col in df_shifted_3.columns:
-                    df[f'{col}_3yr_avg'] = (
-                        df[f'{col}_prev_season'].fillna(0) + 
+                    trend_features[f'{col}_3yr_avg'] = (
+                        df_shifted[col].fillna(0) + 
                         df_shifted_2[col].fillna(0) + 
                         df_shifted_3[col].fillna(0)
                     ) / 3
                     
                     # Calculate deviation from 3-year average
-                    df[f'{col}_vs_3yr_avg'] = df[col] - df[f'{col}_3yr_avg']
-                    df[f'{col}_vs_3yr_avg_pct'] = df[f'{col}_vs_3yr_avg'] / df[f'{col}_3yr_avg'].clip(lower=0.1) * 100
+                    trend_features[f'{col}_vs_3yr_avg'] = df[col] - trend_features[f'{col}_3yr_avg']
+                    trend_features[f'{col}_vs_3yr_avg_pct'] = (
+                        trend_features[f'{col}_vs_3yr_avg'] / trend_features[f'{col}_3yr_avg'].clip(lower=0.1) * 100
+                    )
                 
                 # Calculate weighted moving average (more weight to recent seasons)
                 if col in df_shifted_2.columns and col in df_shifted_3.columns:
-                    df[f'{col}_weighted_avg'] = (
-                        3 * df[f'{col}_prev_season'].fillna(0) + 
+                    trend_features[f'{col}_weighted_avg'] = (
+                        3 * df_shifted[col].fillna(0) + 
                         2 * df_shifted_2[col].fillna(0) + 
                         1 * df_shifted_3[col].fillna(0)
                     ) / 6
                     
                     # Calculate deviation from weighted average
-                    df[f'{col}_vs_weighted_avg'] = df[col] - df[f'{col}_weighted_avg']
-                    df[f'{col}_vs_weighted_avg_pct'] = df[f'{col}_vs_weighted_avg'] / df[f'{col}_weighted_avg'].clip(lower=0.1) * 100
+                    trend_features[f'{col}_vs_weighted_avg'] = df[col] - trend_features[f'{col}_weighted_avg']
+                    trend_features[f'{col}_vs_weighted_avg_pct'] = (
+                        trend_features[f'{col}_vs_weighted_avg'] / trend_features[f'{col}_weighted_avg'].clip(lower=0.1) * 100
+                    )
         
         # Create consistency metrics
         for col in ['fantasy_points', 'fantasy_points_per_game']:
-            if col in df.columns and f'{col}_prev_season' in df.columns:
+            if col in df.columns and f'{col}_prev_season' in trend_features:
                 # Consistency measure (smaller absolute percentage change is more consistent)
-                df[f'{col}_consistency'] = 100 - abs(df[f'{col}_pct_change']).clip(upper=100)
+                trend_features[f'{col}_consistency'] = 100 - abs(trend_features[f'{col}_pct_change']).clip(upper=100)
         
         # Calculate season count for each player
-        df['player_season_count'] = df.groupby('player_id')['season'].transform('count')
+        derived_features['player_season_count'] = df.groupby('player_id')['season'].transform('count')
         
         # Calculate seasons in league for each player
         if 'age' in df.columns:
             # Calculate age-related trends
-            df['seasons_in_league'] = df['player_season_count'] - 1  # 0-indexed
+            derived_features['seasons_in_league'] = derived_features['player_season_count'] - 1  # 0-indexed
             
             # Create "peak season" indicator based on position
             if 'position' in df.columns:
@@ -812,22 +896,29 @@ def add_derived_features(seasonal_data):
                     (df['position'] == 'WR') & (df['age'] >= 25) & (df['age'] <= 29),
                     (df['position'] == 'TE') & (df['age'] >= 26) & (df['age'] <= 30)
                 ]
-                df['peak_season'] = np.select(conditions, [1, 1, 1, 1], default=0)
+                derived_features['peak_season'] = np.select(conditions, [1, 1, 1, 1], default=0)
                 
                 # Create career trajectory indicators
-                df['early_career'] = (df['seasons_in_league'] <= 2).astype(int)
-                df['prime_career'] = ((df['seasons_in_league'] > 2) & (df['seasons_in_league'] <= 6)).astype(int)
-                df['late_career'] = (df['seasons_in_league'] > 6).astype(int)
+                derived_features['early_career'] = (derived_features['seasons_in_league'] <= 2).astype(int)
+                derived_features['prime_career'] = ((derived_features['seasons_in_league'] > 2) & 
+                                                 (derived_features['seasons_in_league'] <= 6)).astype(int)
+                derived_features['late_career'] = (derived_features['seasons_in_league'] > 6).astype(int)
         
-        # Handle missing values for new features
-        for col in df.columns:
-            if col.endswith('_prev_season') or col.endswith('_change') or col.endswith('_pct_change') or \
-               col.endswith('_3yr_avg') or col.endswith('_vs_3yr_avg') or col.endswith('_vs_3yr_avg_pct') or \
-               col.endswith('_weighted_avg') or col.endswith('_vs_weighted_avg') or col.endswith('_vs_weighted_avg_pct') or \
-               col.endswith('_consistency'):
-                df[col] = df[col].fillna(0)
+        # Add all trend features to derived features
+        derived_features.update(trend_features)
     
-    return df
+    # Create a DataFrame with all derived features
+    derived_df = pd.DataFrame(derived_features, index=df.index)
+    
+    # Join derived features with original data
+    result = pd.concat([df, derived_df], axis=1)
+    
+    # Fill NA values in derived features
+    for col in derived_features.keys():
+        if col in result.columns:
+            result[col] = result[col].fillna(0)
+    
+    return result
 
 def add_derived_weekly_features(weekly_data):
     """

@@ -1,0 +1,68 @@
+# Fantasy Football Draft Optimizer Configuration
+
+# ESPN League Information
+league:
+  id: 697625923  # Your ESPN fantasy league ID
+  year: 2024     # The year to analyze
+  # ESPN Credentials (required for private leagues)
+  espn_s2: "AECeHAkR7FZuTvVWSEnMRIA29wVeroZhvd7fHHy5tZvIUdIp4XIZaglA17V6g2rulDDFMCUiC%2BpeXNqWzEJTpjTJsz5Zv2DTMOIjeX0JrC6CYs8kDidYeF0HHkI78OG2O%2Bs6f%2FUPVSwXRBZEGMKPDdKl%2BE0a7na225JN4bC80tD9RXFv32kqqtEk%2Bgw1hgQ968ARiAdt69axAvjryW57rj58sYK4oMJPxjtPbh9tATi%2BSI2AmQ0dNPXZfRTA%2FFgCtgzyxWNwbKT2boYeDfFe7rm8idW47lnavsfYGwWjVpddVY6%2BcupF7uoc9AeVFQ5xNUY%3D"
+  swid: "{42614A28-F6F5-4052-A14A-28F6F52052AF}"
+
+# Data Analysis Parameters
+data:
+  start_year: 2016  # First year to include in historical analysis
+  include_ngs: true  # Whether to include Next Gen Stats (slower but more accurate)
+  debug_mode: false  # Enable for verbose logging
+
+# Clustering Parameters
+clustering:
+  cluster_count: 5  # Number of player tiers/clusters to create
+  drop_bottom_tiers: 1  # Number of bottom tiers to drop
+  use_filtered: true  # Set to true to use the filtered dataset in training
+
+# Player Projection Parameters
+projections:
+  projection_year: 2024  # Year to project
+  perform_cv: true  # Whether to perform cross-validation during model training
+  use_do_not_draft: true  # Apply do_not_draft flags to zero out certain players
+  use_hierarchical: false  # Use hierarchical projection model
+  model_type: "xgboost"  # Model type (random_forest, gradient_boosting, xgboost, lightgbm, catboost)
+  optimize_hyperparams: true  # Whether to optimize hyperparameters
+  feature_selection_method: "shap"  # Feature selection method (importance, rfe, lasso, shap)
+  prioritize_ngs: true  # Whether to prioritize NGS metrics in feature selection
+
+# Visualization Options
+visualizations:
+  enabled: true  # Whether to generate visualizations
+  save_formats: ["png"]  # Format for saving visualizations
+
+# Caching and Reuse Options
+caching:
+  use_cached_raw_data: true  # Set to True to use previously downloaded raw data
+  use_cached_processed_data: true  # Set to True to use previously processed data
+  use_cached_feature_sets: true  # Set to True to use previously engineered features
+
+# Model Loading/Training Options
+models:
+  use_existing: true # Whether to use existing models instead of training new ones
+  models_dir: 'data/models'  
+  
+# Visualization Options
+visualizations:
+  enabled: true  # Whether to generate visualizations
+  
+# Evaluation Options
+evaluation:
+  enabled: true  # Whether to evaluate projections against actual results
+
+# File Paths
+paths:
+  config_path: 'configs/league_settings.json'  # Path to optional ESPN config file
+  data_dir: 'data'  # Base directory for all data
+  output_dir: 'data/outputs'  # Directory for visualizations
+  models_dir: 'data/models'  # Directory for saved models
+
+# Logging
+logging:
+  level: "INFO"  # Logging level (DEBUG, INFO, WARNING, ERROR)
+  file: "fantasy_football.log"  # Log file path

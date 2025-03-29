@@ -15,6 +15,8 @@ from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.ticker import FuncFormatter
 import logging
 from datetime import datetime
+import warnings
+warnings.filterwarnings('ignore')
 
 logger = logging.getLogger(__name__)
 
@@ -349,8 +351,8 @@ class FantasyDataVisualizer:
             return
         
         # Create violin plot
-        ax = sns.violinplot(x='position', y='fantasy_points', data=filtered_data,
-                         palette=self.positions_palette, inner='quartile')
+        ax = sns.violinplot(x='position', y='fantasy_points', hue='position', data=filtered_data,
+                palette=self.positions_palette, inner='quartile', legend=False)
         
         # Add title and labels
         plt.title('Fantasy Points Distribution by Position', fontsize=16, pad=20)
@@ -378,7 +380,7 @@ class FantasyDataVisualizer:
         
         # Add swarm plot for individual points
         sns.swarmplot(x='position', y='fantasy_points', data=filtered_data, 
-                    color='black', alpha=0.5, size=4)
+                    color='black', alpha=0.5, size=2)
         
         # Add title and labels
         plt.title('Fantasy Points Distribution by Position (Box Plot)', fontsize=16, pad=20)

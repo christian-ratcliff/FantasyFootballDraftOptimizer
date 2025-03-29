@@ -605,10 +605,14 @@ class MLExplorer:
             Directory to save the radar plot
         """
         # Calculate z-scores for each feature
+        z_scores = {}
         for feature in features:
             mean = data[feature].mean()
             std = data[feature].std()
-            data[f"{feature}_z"] = (data[feature] - mean) / std if std > 0 else 0
+            z_scores[f"{feature}_z"] = (data[feature] - mean) / std if std > 0 else 0
+
+        # Add all columns at once
+        data = pd.concat([data, pd.DataFrame(z_scores, index=data.index)], axis=1)
         
         # Get z-score feature names
         z_features = [f"{feature}_z" for feature in features]

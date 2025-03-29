@@ -957,49 +957,7 @@ class FantasyFeatureEngineering:
             logger.error(f"Error enhancing with NGS data: {e}")
         
         return enhanced_data
-    
-    def prepare_prediction_features(self):
-        """
-        Prepare features for prediction modeling
-        
-        Returns:
-        --------
-        self : FantasyFeatureEngineering
-            Returns self for method chaining
-        """
-        logger.info("Preparing prediction features")
-        
-        # Process each position's feature set
-        for position in ['qb', 'rb', 'wr', 'te']:
-            feature_key = f"{position}_features"
-            
-            if feature_key not in self.feature_sets or self.feature_sets[feature_key].empty:
-                logger.warning(f"No {position} feature set available")
-                continue
-            
-            # Get position data
-            position_data = self.feature_sets[feature_key].copy()
-            
-            # Select relevant columns for modeling
-            features = self._select_prediction_features(position_data, position)
-            
-            # Split into training and projection sets
-            if self.target_year and 'season' in position_data.columns:
-                train_mask = position_data['season'] < self.target_year
-                projection_mask = position_data['season'] == self.target_year
-                
-                train_data = position_data[train_mask]
-                projection_data = position_data[projection_mask]
-                
-                # Store training and projection data
-                self.feature_sets[f"{position}_train"] = train_data
-                self.feature_sets[f"{position}_projection"] = projection_data
-                
-                logger.info(f"Split {position} data into {len(train_data)} training and {len(projection_data)} projection samples")
-            else:
-                logger.warning(f"Cannot split {position} data - missing target year or season column")
-        
-        return self
+
     
     def _select_prediction_features(self, data, position):
         """
@@ -1300,11 +1258,17 @@ class FantasyFeatureEngineering:
         # Drop any constant columns or those with too many NaN values
         valid_features = []
         for col in selected_features:
-            # Check if column has variation
-            if data[col].nunique() > 1:
-                # Check if column has reasonable amount of non-NaN values
-                if data[col].notna().mean() > 0.7:  # At least 70% non-NaN
-                    valid_features.append(col)
+            try:
+                # Check if column has variation
+                n_unique = data[col].nunique()
+                if n_unique > 1:
+                    # Check if column has reasonable amount of non-NaN values
+                    non_nan_ratio = float(data[col].notna().mean())  # Convert to float explicitly
+                    if non_nan_ratio > 0.7:  # At least 70% non-NaN
+                        valid_features.append(col)
+            except Exception as e:
+                logger.warning(f"Error processing column {col}: {e} -- SKIPPED ")
+                continue
         
         logger.info(f"Selected {len(valid_features)} features for {position} clustering")
         return valid_features
@@ -1344,13 +1308,36 @@ class FantasyFeatureEngineering:
                 projection_data_combined.append(self.feature_sets[projection_key])
         
         # Combine datasets
+        # Reset index on each DataFrame before concatenation
         if train_data_combined:
-            self.feature_sets['train_combined'] = pd.concat(train_data_combined, ignore_index=True)
+            # for i, df in enumerate(train_data_combined):
+            #     logger.info(f"Before Reset - Train DataFrame {i} index: {df.index.tolist()}")
+
+            # Reset index and create a fresh copy
+            train_data_reset = [df.reset_index(drop=True).copy() for df in train_data_combined]
+
+            # for i, df in enumerate(train_data_reset):
+            #     logger.info(f"After Reset - Train DataFrame {i} index: {df.index.tolist()}")
+
+            # Now, concatenate safely
+            self.feature_sets['train_combined'] = pd.concat(train_data_reset, ignore_index=True, verify_integrity=True)
             logger.info(f"Created combined training set with {len(self.feature_sets['train_combined'])} players")
-        
+
         if projection_data_combined:
-            self.feature_sets['projection_combined'] = pd.concat(projection_data_combined, ignore_index=True)
+            # for i, df in enumerate(projection_data_combined):
+            #     logger.info(f"Before Reset - Projection DataFrame {i} index: {df.index.tolist()}")
+
+            projection_data_reset = [df.reset_index(drop=True).copy() for df in projection_data_combined]
+
+            # for i, df in enumerate(projection_data_reset):
+            #     logger.info(f"After Reset - Projection DataFrame {i} index: {df.index.tolist()}")
+
+            self.feature_sets['projection_combined'] = pd.concat(projection_data_reset, ignore_index=True, verify_integrity=True)
             logger.info(f"Created combined projection set with {len(self.feature_sets['projection_combined'])} players")
+
+        # train_data_combined = [df[~df.index.duplicated()].reset_index(drop=True) for df in train_data_combined]
+        # projection_data_combined = [df[~df.index.duplicated()].reset_index(drop=True) for df in projection_data_combined]
+
         
         return self
     
@@ -1375,3 +1362,65 @@ class FantasyFeatureEngineering:
             Dictionary of cluster models
         """
         return self.cluster_models
+    
+    def prepare_prediction_features(self):
+        """Prepare features for prediction modeling with meaningful filters"""
+        logger.info("Preparing prediction features with meaningful sample filtering")
+        
+        # Process each position's feature set
+        for position in ['qb', 'rb', 'wr', 'te']:
+            feature_key = f"{position}_features"
+            
+            if feature_key not in self.feature_sets or self.feature_sets[feature_key].empty:
+                logger.warning(f"No {position} feature set available")
+                continue
+            
+            # Get position data
+            position_data = self.feature_sets[feature_key].copy()
+            
+            # Apply meaningful sample filtering BEFORE splitting into train/projection
+            if position == 'qb':
+                # Filter QBs with meaningful sample size
+                position_data = position_data[position_data['attempts'] >= 100].copy()
+                logger.info(f"Filtered QBs to those with at least 100 attempts ({len(position_data)} players)")
+            
+            elif position == 'rb':
+                # Filter RBs with meaningful touches
+                if all(col in position_data.columns for col in ['carries', 'receptions']):
+                    position_data = position_data[
+                        (position_data['carries'] + position_data['receptions']) >= 80
+                    ].copy()
+                    logger.info(f"Filtered RBs to those with at least 80 touches ({len(position_data)} players)")
+            
+            elif position == 'wr':
+                # Filter WRs with meaningful targets
+                if 'targets' in position_data.columns:
+                    position_data = position_data[position_data['targets'] >= 40].copy()
+                    logger.info(f"Filtered WRs to those with at least 40 targets ({len(position_data)} players)")
+            
+            elif position == 'te':
+                # Filter TEs with meaningful targets
+                if 'targets' in position_data.columns:
+                    position_data = position_data[position_data['targets'] >= 30].copy()
+                    logger.info(f"Filtered TEs to those with at least 30 targets ({len(position_data)} players)")
+            
+            # Select relevant columns for modeling - continue with your existing code
+            features = self._select_prediction_features(position_data, position)
+            
+            # Split into training and projection sets
+            if self.target_year and 'season' in position_data.columns:
+                train_mask = position_data['season'] < self.target_year
+                projection_mask = position_data['season'] == self.target_year
+                
+                train_data = position_data[train_mask]
+                projection_data = position_data[projection_mask]
+                
+                # Store training and projection data
+                self.feature_sets[f"{position}_train"] = train_data
+                self.feature_sets[f"{position}_projection"] = projection_data
+                
+                logger.info(f"Split {position} data into {len(train_data)} training and {len(projection_data)} projection samples")
+            else:
+                logger.warning(f"Cannot split {position} data - missing target year or season column")
+        
+        return self

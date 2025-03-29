@@ -4,7 +4,7 @@ configs
 old
 data
 gemeni_garbage
-
+src/data -f
 __pycache__
 
 *.log

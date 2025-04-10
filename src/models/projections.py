@@ -11,6 +11,28 @@ from datetime import datetime
 # Setup logging
 logger = logging.getLogger(__name__)
 
+try:
+    import xgboost as xgb
+    XGB_AVAILABLE = True
+except ImportError:
+    XGB_AVAILABLE = False
+try:
+    import lightgbm as lgb
+    LGB_AVAILABLE = True
+except ImportError:
+    LGB_AVAILABLE = False
+try:
+    import shap
+    SHAP_AVAILABLE = True
+except ImportError:
+    SHAP_AVAILABLE = False
+try:
+    import optuna
+    OPTUNA_AVAILABLE = True
+except ImportError:
+    OPTUNA_AVAILABLE = False
+
+
 class PlayerProjectionModel:
     """
     Model that uses enhanced approach for player projections with hierarchical modeling,
@@ -49,13 +71,14 @@ class PlayerProjectionModel:
         self._validate_feature_sets()
     
     def _validate_feature_sets(self):
-        """Validate that we have the necessary feature sets"""
+        """Validate necessary feature sets for training."""
         required_keys = [f"{pos}_train" for pos in ['qb', 'rb', 'wr', 'te']]
-        missing_keys = [key for key in required_keys if key not in self.feature_sets]
-        
-        if missing_keys:
-            logger.warning(f"Missing required feature sets: {missing_keys}")
-            logger.warning("Make sure you've processed data before using this model")
+        missing_keys = [key for key in required_keys if key not in self.feature_sets or self.feature_sets[key].empty]
+        if missing_keys: logger.warning(f"Missing/empty required training sets: {missing_keys} in {list(self.feature_sets.keys())}")
+        else: logger.debug("Required training feature sets found.")
+        required_proj_keys = [f"{pos}_projection" for pos in ['qb', 'rb', 'wr', 'te']]
+        missing_proj_keys = [key for key in required_proj_keys if key not in self.feature_sets or self.feature_sets[key].empty]
+        if missing_proj_keys: logger.debug(f"Note: Projection feature sets missing/empty: {missing_proj_keys}")
     
     def _get_available_years(self, position):
         """Get all available years for a position"""
@@ -121,8 +144,9 @@ class PlayerProjectionModel:
         features = [col for col in numeric_cols if col not in exclude_cols]
         
         return features
+    
 
-    def select_features_with_method(self, position, method='importance', top_n=20):
+    def select_features_with_method(self, position, method='shap', top_n=20):
         """
         Select features using various methods
         
@@ -287,7 +311,6 @@ class PlayerProjectionModel:
                 
                 # Calculate mean absolute SHAP values for each feature
                 mean_shap = np.abs(shap_values).mean(axis=0)
-                
                 # Create DataFrame with feature names and SHAP values
                 shap_df = pd.DataFrame({
                     'feature': all_features,
@@ -395,26 +418,6 @@ class PlayerProjectionModel:
                 logger.warning("LightGBM not installed. Using RandomForest instead.")
                 return RandomForestRegressor(n_estimators=100, random_state=42)
                 
-        elif model_type == 'catboost':
-            # Default CatBoost hyperparams
-            cb_params = {
-                'iterations': 100,
-                'learning_rate': 0.1,
-                'depth': 5,
-                'loss_function': 'RMSE',
-                'random_seed': 42
-            }
-            
-            if hyperparams:
-                cb_params.update(hyperparams)
-                
-            try:
-                import catboost as cb
-                return cb.CatBoostRegressor(**cb_params, verbose=False)
-            except ImportError:
-                logger.warning("CatBoost not installed. Using RandomForest instead.")
-                return RandomForestRegressor(n_estimators=100, random_state=42)
-        
         else:
             logger.warning(f"Unknown model type: {model_type}. Using RandomForest instead.")
             return RandomForestRegressor(n_estimators=100, random_state=42)
@@ -428,7 +431,7 @@ class PlayerProjectionModel:
         position : str
             Position to train model for ('qb', 'rb', 'wr', 'te')
         model_type : str
-            Type of model ('random_forest', 'gradient_boosting', 'xgboost', 'lightgbm', 'catboost')
+            Type of model ('random_forest', 'gradient_boosting', 'xgboost', 'lightgbm')
         hyperparams : dict, optional
             Model hyperparameters
         selected_features : list, optional
@@ -623,7 +626,7 @@ class PlayerProjectionModel:
         position : str
             Position to optimize for ('qb', 'rb', 'wr', 'te')
         model_type : str
-            Type of model ('random_forest', 'gradient_boosting', 'xgboost', 'lightgbm', 'catboost')
+            Type of model ('random_forest', 'gradient_boosting', 'xgboost', 'lightgbm')
         n_trials : int
             Number of optimization trials
             
@@ -692,13 +695,6 @@ class PlayerProjectionModel:
                     'num_leaves': trial.suggest_int('num_leaves', 10, 100),
                     'max_depth': trial.suggest_int('max_depth', 3, 12),
                     'min_data_in_leaf': trial.suggest_int('min_data_in_leaf', 5, 50)
-                }
-            elif model_type == 'catboost':
-                hyperparams = {
-                    'iterations': trial.suggest_int('iterations', 50, 300),
-                    'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3),
-                    'depth': trial.suggest_int('depth', 3, 10),
-                    'l2_leaf_reg': trial.suggest_float('l2_leaf_reg', 1.0, 10.0)
                 }
             else:
                 logger.warning(f"Unknown model type: {model_type}. Using default hyperparameters.")
@@ -827,7 +823,7 @@ class PlayerProjectionModel:
         Parameters:
         -----------
         model_type : str
-            Type of model ('random_forest', 'gradient_boosting', 'xgboost', 'lightgbm', 'catboost')
+            Type of model ('random_forest', 'gradient_boosting', 'xgboost', 'lightgbm')
         hyperparams : dict, optional
             Model hyperparameters
         optimize_hyperparams : bool
@@ -853,7 +849,7 @@ class PlayerProjectionModel:
                     logger.warning(f"Hyperparameter optimization failed: {e}")
             
             # Perform feature selection
-            selected_features = self.select_features_with_method(position, method='importance', top_n=20)
+            selected_features = self.select_features_with_method(position, method='shap', top_n=20)
             
             # Train model with time series validation
             metrics = self.train_with_time_series_validation(
@@ -912,7 +908,7 @@ class PlayerProjectionModel:
         position : str
             Position to train for ('qb', 'rb', 'wr', 'te')
         model_type : str
-            Type of model ('random_forest', 'gradient_boosting', 'xgboost', 'lightgbm', 'catboost')
+            Type of model ('random_forest', 'gradient_boosting', 'xgboost', 'lightgbm')
         hyperparams : dict, optional
             Model hyperparameters
             
@@ -1532,7 +1528,7 @@ class PlayerProjectionModel:
         Parameters:
         -----------
         model_type : str
-            Type of model ('random_forest', 'gradient_boosting', 'xgboost', 'lightgbm', 'catboost')
+            Type of model ('random_forest', 'gradient_boosting', 'xgboost', 'lightgbm')
         hyperparams : dict, optional
             Model hyperparameters
             
@@ -1611,14 +1607,21 @@ class PlayerProjectionModel:
                 
                 # Save top players to CSV
                 if 'name' in proj_data.columns:
-                    top_players = proj_data.sort_values('projected_points', ascending=False).head(20)
+                    top_players = proj_data.sort_values('projected_points', ascending=False)
                     top_players_path = os.path.join(self.output_dir, f"top_{position}_projections.csv")
-                    cols = ['name', 'projected_points', 'projection_low', 'projection_high', 'ceiling_projection']
+                    cols = ['player_id', 'name', 'position', 'projected_points', 'projection_low', 'projection_high', 'ceiling_projection']
                     if 'age' in top_players.columns:
                         cols.append('age')
                     component_cols = [col for col in top_players.columns if col.startswith('projected_') and col not in cols]
                     cols.extend(component_cols[:5])  # Add top component predictions
-                    top_players[cols].to_csv(top_players_path, index=False)
+                    
+                    # Create a copy of the dataframe for export
+                    export_players = top_players[cols].copy()
+                    # Modify player_id to skip first three characters
+                    export_players['player_id'] = export_players['player_id'].str[3:]
+                    # Save the modified dataframe
+                    export_players.to_csv(top_players_path, index=False)
+                    
                     logger.info(f"Saved top {position} projections to {top_players_path}")
         
         return projections

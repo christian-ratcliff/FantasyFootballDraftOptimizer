@@ -1021,7 +1021,7 @@ class FantasyFeatureEngineering:
             position_features = [
                 'receiving_yards', 'receiving_yards_per_game', 'receiving_tds', 'receiving_tds_per_game',
                 'receptions', 'targets', 'reception_rate', 'yards_per_reception', 'yards_per_target',
-                'air_yards_share', 'yac_share', 'racr', 'td_per_reception',
+                'air_yards_share', 'yac_share', 'td_per_reception',
                 'fantasy_points_per_target', 'is_wr', 'is_te'
             ]
         else:
@@ -1241,8 +1241,8 @@ class FantasyFeatureEngineering:
             if 'air_yards_share' in data.columns:
                 position_features.append('air_yards_share')
             
-            if 'racr' in data.columns:
-                position_features.append('racr')
+            # if 'racr' in data.columns:
+            #     position_features.append('racr')
             
             # Add NGS features if available
             ngs_features = [col for col in data.columns if col.startswith('ngs_rec_')]
@@ -1309,34 +1309,34 @@ class FantasyFeatureEngineering:
         
         # Combine datasets
         # Reset index on each DataFrame before concatenation
-        if train_data_combined:
-            # for i, df in enumerate(train_data_combined):
-            #     logger.info(f"Before Reset - Train DataFrame {i} index: {df.index.tolist()}")
+        # if train_data_combined:
+        #     # for i, df in enumerate(train_data_combined):
+        #     #     logger.info(f"Before Reset - Train DataFrame {i} index: {df.index.tolist()}")
 
-            # Reset index and create a fresh copy
-            train_data_reset = [df.reset_index(drop=True).copy() for df in train_data_combined]
+        #     # Reset index and create a fresh copy
+        #     train_data_reset = [df.reset_index(drop=True).copy() for df in train_data_combined]
 
-            # for i, df in enumerate(train_data_reset):
-            #     logger.info(f"After Reset - Train DataFrame {i} index: {df.index.tolist()}")
+        #     # for i, df in enumerate(train_data_reset):
+        #     #     logger.info(f"After Reset - Train DataFrame {i} index: {df.index.tolist()}")
 
-            # Now, concatenate safely
-            self.feature_sets['train_combined'] = pd.concat(train_data_reset, ignore_index=True, verify_integrity=True)
-            logger.info(f"Created combined training set with {len(self.feature_sets['train_combined'])} players")
+        #     # Now, concatenate safely
+        #     self.feature_sets['train_combined'] = pd.concat(train_data_reset, ignore_index=True, verify_integrity=True)
+        #     logger.info(f"Created combined training set with {len(self.feature_sets['train_combined'])} players")
 
-        if projection_data_combined:
-            # for i, df in enumerate(projection_data_combined):
-            #     logger.info(f"Before Reset - Projection DataFrame {i} index: {df.index.tolist()}")
+        # if projection_data_combined:
+        #     # for i, df in enumerate(projection_data_combined):
+        #     #     logger.info(f"Before Reset - Projection DataFrame {i} index: {df.index.tolist()}")
 
-            projection_data_reset = [df.reset_index(drop=True).copy() for df in projection_data_combined]
+        #     projection_data_reset = [df.reset_index(drop=True).copy() for df in projection_data_combined]
 
-            # for i, df in enumerate(projection_data_reset):
-            #     logger.info(f"After Reset - Projection DataFrame {i} index: {df.index.tolist()}")
+        #     # for i, df in enumerate(projection_data_reset):
+        #     #     logger.info(f"After Reset - Projection DataFrame {i} index: {df.index.tolist()}")
 
-            self.feature_sets['projection_combined'] = pd.concat(projection_data_reset, ignore_index=True, verify_integrity=True)
-            logger.info(f"Created combined projection set with {len(self.feature_sets['projection_combined'])} players")
+        #     self.feature_sets['projection_combined'] = pd.concat(projection_data_reset, ignore_index=True, verify_integrity=True)
+        #     logger.info(f"Created combined projection set with {len(self.feature_sets['projection_combined'])} players")
 
-        # train_data_combined = [df[~df.index.duplicated()].reset_index(drop=True) for df in train_data_combined]
-        # projection_data_combined = [df[~df.index.duplicated()].reset_index(drop=True) for df in projection_data_combined]
+        train_data_combined = [df[~df.index.duplicated()].reset_index(drop=True) for df in train_data_combined]
+        projection_data_combined = [df[~df.index.duplicated()].reset_index(drop=True) for df in projection_data_combined]
 
         
         return self

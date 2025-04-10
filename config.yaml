@@ -1,68 +1,150 @@
-# Fantasy Football Draft Optimizer Configuration
+# ==============================================================
+# Fantasy Football Projection & RL Draft Agent Configuration
+# ==============================================================
 
-# ESPN League Information
+# --- ESPN League Information ---
 league:
-  id: 697625923  # Your ESPN fantasy league ID
-  year: 2024     # The year to analyze
-  # ESPN Credentials (required for private leagues)
+  id: 697625923                 # Your ESPN fantasy league ID
+  year: 2024                    # The season year for analysis and projection
+  # ESPN Credentials (required ONLY for private leagues via API)
   espn_s2: "AECeHAkR7FZuTvVWSEnMRIA29wVeroZhvd7fHHy5tZvIUdIp4XIZaglA17V6g2rulDDFMCUiC%2BpeXNqWzEJTpjTJsz5Zv2DTMOIjeX0JrC6CYs8kDidYeF0HHkI78OG2O%2Bs6f%2FUPVSwXRBZEGMKPDdKl%2BE0a7na225JN4bC80tD9RXFv32kqqtEk%2Bgw1hgQ968ARiAdt69axAvjryW57rj58sYK4oMJPxjtPbh9tATi%2BSI2AmQ0dNPXZfRTA%2FFgCtgzyxWNwbKT2boYeDfFe7rm8idW47lnavsfYGwWjVpddVY6%2BcupF7uoc9AeVFQ5xNUY%3D"
   swid: "{42614A28-F6F5-4052-A14A-28F6F52052AF}"
 
-# Data Analysis Parameters
+# --- Data Loading & Processing ---
 data:
-  start_year: 2016  # First year to include in historical analysis
-  include_ngs: true  # Whether to include Next Gen Stats (slower but more accurate)
-  debug_mode: false  # Enable for verbose logging
+  start_year: 2016             # First year for historical data analysis
+  include_ngs: true            # Include Next Gen Stats
+  debug_mode: false            # Verbose data loading logs
 
-# Clustering Parameters
+# --- Feature Engineering & Clustering ---
 clustering:
-  cluster_count: 5  # Number of player tiers/clusters to create
-  drop_bottom_tiers: 1  # Number of bottom tiers to drop
-  use_filtered: true  # Set to true to use the filtered dataset in training
+  cluster_count: 5             # Number of player tiers/clusters per position
+  drop_bottom_tiers: 1         # How many lowest tiers to potentially filter out
+  use_filtered: false          # Train/project ONLY on players NOT in dropped tiers?
 
-# Player Projection Parameters
+# --- Player Projection Model Configuration ---
 projections:
-  projection_year: 2024  # Year to project
-  perform_cv: true  # Whether to perform cross-validation during model training
-  use_do_not_draft: true  # Apply do_not_draft flags to zero out certain players
-  use_hierarchical: false  # Use hierarchical projection model
-  model_type: "xgboost"  # Model type (random_forest, gradient_boosting, xgboost, lightgbm, catboost)
-  optimize_hyperparams: true  # Whether to optimize hyperparameters
-  feature_selection_method: "shap"  # Feature selection method (importance, rfe, lasso, shap)
-  prioritize_ngs: true  # Whether to prioritize NGS metrics in feature selection
+  projection_year: 2024        # The year the projections are *for*
+  use_do_not_draft: true       # Apply 'do_not_draft' flags (zeros out projections)
+  use_hierarchical: false      # Use hierarchical component models (True) or direct model (False)
+  model_type: "xgboost"        # Algorithm: 'random_forest', 'gradient_boosting', 'xgboost', 'lightgbm'
+  optimize_hyperparams: true  # Use Optuna for projection model HPO (takes longer)
+  feature_selection_method: "shap" # Method: 'importance', 'rfe', 'rfecv', 'lasso', 'shap'
+  prioritize_ngs: true         # Give higher priority to NGS features during selection
 
-# Visualization Options
-visualizations:
-  enabled: true  # Whether to generate visualizations
-  save_formats: ["png"]  # Format for saving visualizations
-
-# Caching and Reuse Options
+# --- Caching Options ---
 caching:
-  use_cached_raw_data: true  # Set to True to use previously downloaded raw data
-  use_cached_processed_data: true  # Set to True to use previously processed data
-  use_cached_feature_sets: true  # Set to True to use previously engineered features
+  use_cached_raw_data: true     # Use data from 'data/raw' if available
+  use_cached_processed_data: true # Use data from 'data/processed' if available
+  use_cached_feature_sets: true  # Use feature sets from 'data/processed' if available
 
-# Model Loading/Training Options
-models:
-  use_existing: true # Whether to use existing models instead of training new ones
-  models_dir: 'data/models'  
-  
-# Visualization Options
+# --- Projection Model Loading ---
+models_loading:
+  use_existing_projection_models: true # Load projection models from 'paths.models_dir'?
+
+# --- Reinforcement Learning (RL) Draft Agent Training ---
+rl_training:
+  enabled: true              # Run main RL training/eval for projection_year
+  agent_draft_position: 5      # Simulates the agent drafting from this slot (1-based index)
+  final_training_timesteps: 1024000 # Timesteps for the FINAL training run (e.g., 1M+)
+  model_save_path: "ppo_fantasy_draft_agent" # Base name for saving main model
+  tensorboard_log_path: "./ppo_fantasydraft_tensorboard/" # Base path for logs
+
+  # --- PPO Hyperparameters (Defaults for FINAL run, or starting point for Optuna) ---
+  ppo_hyperparams:
+    learning_rate: 3.0e-4    # Example: Start with a potentially better tuned LR
+    n_steps: 2048
+    batch_size: 128        # Example: Start with a potentially better tuned BS
+    n_epochs: 10
+    gamma: 0.995
+    gae_lambda: 0.95
+    clip_range: 0.2
+    ent_coef: 0.01
+    vf_coef: 0.75            # Example: Start with a potentially better tuned VC
+    max_grad_norm: 0.5
+    # Policy network architecture
+    policy_kwargs:
+      net_arch:
+        - pi: [128, 128]
+          vf: [256, 128, 64]
+
+  # --- Optuna Hyperparameter Optimization (for PPO) ---
+  optuna:
+    enabled: true    # Set true to run Optuna HPO *before* final training
+    n_trials: 100              # Number of Optuna trials
+    trial_timesteps: 65536   # Timesteps per Optuna trial
+    # Define parameter search spaces (adjust ranges as needed)
+    search_space:
+      learning_rate:
+        type: 'loguniform'
+        low: 1.0e-5
+        high: 1.0e-3
+      n_steps:
+        type: 'categorical'
+        choices: [1024, 2048, 4096]
+      batch_size:
+        type: 'categorical'
+        choices: [64, 128, 256]
+      n_epochs:
+        type: 'int'
+        low: 5
+        high: 20
+      gamma:
+        type: 'uniform'
+        low: 0.98
+        high: 0.999
+      gae_lambda:
+        type: 'uniform'
+        low: 0.9
+        high: 0.99
+      ent_coef:
+        type: 'loguniform'
+        low: 1.0e-4 # Lower bound to avoid zero
+        high: 0.05  # Upper bound, typically small
+      vf_coef:
+        type: 'uniform'
+        low: 0.3
+        high: 0.9 # Allow higher values
+      # --- Optional: Tuning Network Architecture
+      policy_kwargs_net_arch:
+        type: 'categorical'
+        # Format: 'pi=L1,L2_vf=L1,L2' - parsed in objective function
+        choices:
+          # 1. Small / Standard Default
+          - 'pi=64,64_vf=64,64'
+          # 2. Medium Symmetric
+          - 'pi=128,128_vf=128,128'
+          # 3. Large Symmetric
+          - 'pi=256,256_vf=256,256'
+          # 4. Medium Policy, Slightly Smaller Value
+          - 'pi=128,128_vf=64,64'
+          # 5. Medium Policy, Larger Tapered Value
+          - 'pi=128,128_vf=256,128,64'
+          # 6. Medium Policy, Larger Symmetric Value
+          - 'pi=128,128_vf=256,256'
+          # 7. Slightly Deeper Medium Symmetric
+          - 'pi=128,128,64_vf=128,128,64'
+
+# --- Visualization Options ---
 visualizations:
-  enabled: true  # Whether to generate visualizations
-  
-# Evaluation Options
+  enabled: false              # Generate plots (excluding RL custom plot if PlottingCallback removed)
+
+# --- Evaluation Options ---
 evaluation:
-  enabled: true  # Whether to evaluate projections against actual results
+  enabled: true                # Evaluate projection models against past actuals
 
-# File Paths
+# --- File Paths ---
 paths:
-  config_path: 'configs/league_settings.json'  # Path to optional ESPN config file
-  data_dir: 'data'  # Base directory for all data
-  output_dir: 'data/outputs'  # Directory for visualizations
-  models_dir: 'data/models'  # Directory for saved models
+  config_path: 'configs/league_settings.json'
+  data_dir: 'data_testing'
+  raw_dir: 'data_testing/raw'
+  processed_dir: 'data_testing/processed'
+  output_dir: 'data_testing/outputs'
+  models_dir: 'data_testing/models'
 
-# Logging
+# --- Logging Configuration ---
 logging:
-  level: "INFO"  # Logging level (DEBUG, INFO, WARNING, ERROR)
-  file: "fantasy_football.log"  # Log file path
+  level: "INFO"                # Logging level for file: DEBUG, INFO, WARNING, ERROR
+  file: "fantasy_football.log" # Path to log file (leave null/empty to disable)
+
+# ==============================================================

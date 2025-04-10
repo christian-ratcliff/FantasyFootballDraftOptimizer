@@ -1,7 +1,9 @@
 .venv
 .vscode
 configs
+notebooks
 old
+old_models
 data
 gemeni_garbage
 src/data -f
@@ -11,3 +13,7 @@ __pycache__
 *.png
 *.csv
 *.json
+events.out.*
+*.joblib
+.DS_STORE
+*.pkl

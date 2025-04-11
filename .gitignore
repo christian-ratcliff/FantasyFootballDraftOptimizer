@@ -18,3 +18,5 @@ events.out.*
 .DS_STORE
 *.pkl
 *.db
+*.zip
+*.txt

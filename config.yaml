@@ -44,7 +44,7 @@ models_loading:
 
 # --- Reinforcement Learning (RL) Draft Agent Training ---
 rl_training:
-  enabled: true              # Run main RL training/eval for projection_year
+  enabled: false             # Run main RL training/eval for projection_year
   agent_draft_position: 5      # Simulates the agent drafting from this slot (1-based index)
   final_training_timesteps: 1024000 # Timesteps for the FINAL training run (e.g., 1M+)
   model_save_path: "ppo_fantasy_draft_agent" # Base name for saving main model
@@ -129,7 +129,7 @@ rl_training:
 
 # --- Visualization Options ---
 visualizations:
-  enabled: false              # Generate plots (excluding RL custom plot if PlottingCallback removed)
+  enabled: true              # Generate plots (excluding RL custom plot if PlottingCallback removed)
 
 # --- Evaluation Options ---
 evaluation:

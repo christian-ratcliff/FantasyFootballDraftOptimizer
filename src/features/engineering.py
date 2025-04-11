@@ -375,6 +375,27 @@ class FantasyFeatureEngineering:
             # Flag very old QBs who are likely near retirement
             df.loc[(df['age'] >= 38) & (df['attempts_vs_peak'] < 0.7), 'do_not_draft'] = 1
         
+        # Add interaction features
+        if 'age' in df.columns:
+            # Interaction between age and volume/efficiency
+            if 'attempts_per_game' in df.columns:
+                df['age_x_attempts_pg'] = df['age'] * df['attempts_per_game']
+            if 'adjusted_yards_per_attempt' in df.columns:
+                 df['age_x_adj_ya'] = df['age'] * df['adjusted_yards_per_attempt']
+            if 'rush_yards_percentage' in df.columns:
+                 df['age_x_rush_pct'] = df['age'] * df['rush_yards_percentage'] # Older rushing QBs?
+
+        if 'oline_quality' in df.columns:
+             if 'attempts_per_game' in df.columns:
+                  df['oline_x_attempts_pg'] = df['oline_quality'] * df['attempts_per_game']
+             if 'epa_per_attempt' in df.columns:
+                  df['oline_x_epa_pa'] = df['oline_quality'] * df['epa_per_attempt']
+
+        if 'receiver_quality_boost' in df.columns:
+             if 'passing_tds_per_game' in df.columns:
+                  df['rec_quality_x_pass_td_pg'] = df['receiver_quality_boost'] * df['passing_tds_per_game']
+             if 'passing_yards_per_game' in df.columns:
+                  df['rec_quality_x_pass_yd_pg'] = df['receiver_quality_boost'] * df['passing_yards_per_game']
         return df
 
     def _add_rb_specific_features(self, rb_data):
@@ -615,6 +636,32 @@ class FantasyFeatureEngineering:
             
             # Flag older RBs who are likely declining
             df.loc[(df['age'] >= 30) & (df['touches_vs_peak'] < 0.8), 'do_not_draft'] = 1
+        
+        # Add interaction features
+        if 'age' in df.columns:
+            if 'touches_per_game' in df.columns:
+                df['age_x_touches_pg'] = df['age'] * df['touches_per_game'] # Age cliff interaction
+            if 'receiving_opportunity_share' in df.columns:
+                df['age_x_rec_opp_share'] = df['age'] * df['receiving_opportunity_share'] # Does receiving role change with age?
+            if 'yards_per_carry' in df.columns:
+                 df['age_x_ypc'] = df['age'] * df['yards_per_carry']
+
+        if 'career_touches_to_date' in df.columns:
+             if 'yards_per_carry' in df.columns:
+                  df['careertouch_x_ypc'] = df['career_touches_to_date'] * df['yards_per_carry'] # Mileage effect on efficiency
+             if 'fantasy_points_per_touch' in df.columns:
+                  df['careertouch_x_fpts_pt'] = df['career_touches_to_date'] * df['fantasy_points_per_touch']
+
+        if 'oline_quality' in df.columns:
+             if 'yards_per_carry' in df.columns:
+                  df['oline_x_ypc'] = df['oline_quality'] * df['yards_per_carry']
+             if 'rushing_td_rate' in df.columns:
+                   # Ensure rushing_td_rate exists before interaction
+                   if 'rushing_tds' in df.columns and 'carries' in df.columns:
+                       df['rushing_td_rate'] = (df['rushing_tds'] / df['carries'].clip(lower=1)) * 100
+                       df['oline_x_rush_td_rate'] = df['oline_quality'] * df['rushing_td_rate'].fillna(0) # Fill NaNs before multiplying
+                   else:
+                       df['oline_x_rush_td_rate'] = 0 # Or some other default
         
         return df
 
@@ -876,6 +923,27 @@ class FantasyFeatureEngineering:
         if all(col in df.columns for col in ['receiving_air_yards', 'receiving_yards']):
             df['air_yards_share'] = df['receiving_air_yards'] / df['receiving_yards'].clip(lower=1) * 100
             df['yac_share'] = 100 - df['air_yards_share']
+        
+        # Add interaction features
+        if 'age' in df.columns:
+             if 'targets_per_game' in df.columns:
+                 df['age_x_targets_pg'] = df['age'] * df['targets_per_game']
+             if 'yards_per_reception' in df.columns:
+                 df['age_x_ypr'] = df['age'] * df['yards_per_reception']
+             if 'air_yards_share' in df.columns: # Assuming air_yards_share calculation is done first
+                 df['age_x_air_yards_share'] = df['age'] * df['air_yards_share']
+
+        if 'qb_quality' in df.columns: # Assuming qb_quality is calculated/merged
+             if 'targets_per_game' in df.columns:
+                 df['qb_qual_x_targets_pg'] = df['qb_quality'] * df['targets_per_game']
+             if 'yards_per_target' in df.columns: # Assuming yards_per_target is calculated
+                 df['qb_qual_x_ypt'] = df['qb_quality'] * df['yards_per_target']
+             if 'receiving_td_rate' in df.columns: # Assuming receiving_td_rate is calculated
+                 df['qb_qual_x_rec_td_rate'] = df['qb_quality'] * df['receiving_td_rate']
+
+        if 'target_competition' in df.columns: # Assuming target_competition is calculated
+            if 'targets_per_game' in df.columns:
+                 df['tgt_comp_x_targets_pg'] = df['target_competition'] * df['targets_per_game']
         
         return df
 

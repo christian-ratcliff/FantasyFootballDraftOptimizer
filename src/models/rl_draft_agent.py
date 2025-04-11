@@ -2444,7 +2444,7 @@ class FantasyDraftEnv(gym.Env):
         # Only penalize for core required positions (QB, RB, WR, TE)
         required_core_starters = {'QB': req_counts['QB'], 'RB': req_counts['RB'], 'WR': req_counts['WR'], 'TE': req_counts['TE']}
 
-        self.rl_logger.debug(f"Reward Calc: Checking penalties (penalty_per_slot={penalty_per_slot}). Filled: {filled_counts}")
+        # self.rl_logger.debug(f"Reward Calc: Checking penalties (penalty_per_slot={penalty_per_slot}). Filled: {filled_counts}")
         for pos, required in required_core_starters.items():
             # if pos == 'QB' or pos == 'TE':
             #     penalty_per_slot = 17.0

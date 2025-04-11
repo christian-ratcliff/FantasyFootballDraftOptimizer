@@ -17,3 +17,4 @@ events.out.*
 *.joblib
 .DS_STORE
 *.pkl
+*.db

@@ -7,13 +7,24 @@ Includes Monitor wrapper for proper episode logging to TensorBoard for the final
 Relies on external script/TensorBoard for plotting.
 ADDED DEBUG LOGGING around PPO initialization.
 """
+import warnings
+
+# Filter out only the specific warning about mlp_extractor
+warnings.filterwarnings(
+    "ignore", 
+    message="As shared layers in the mlp_extractor are removed since SB3 v1.8.0.*", 
+    category=UserWarning
+)
+from tqdm import tqdm
 
 import os
+import signal
 import logging
 import yaml
 import json
 import joblib
 import pandas as pd
+import logging.config
 import numpy as np
 import random
 import gymnasium as gym
@@ -22,7 +33,36 @@ from datetime import datetime # For Optuna study name timestamp
 import sys # For memory usage check
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 import multiprocessing # To get CPU count
+import torch
+import traceback
+import concurrent.futures
+import psutil
 
+_GLOBAL_INSTANCE = None
+
+
+def kill_all_children_and_exit(sig=None, frame=None):
+    """Kill all child processes and exit forcefully"""
+    print("\n\nFORCE TERMINATING ALL PROCESSES")
+    
+    # Get the current process
+    current_process = psutil.Process(os.getpid())
+    
+    # Kill all child processes
+    for child in current_process.children(recursive=True):
+        try:
+            print(f"Killing child process {child.pid}")
+            child.kill()
+        except:
+            pass
+    
+    # Exit immediately without cleanup
+    os._exit(1)
+
+def force_exit_handler(sig, frame):
+    print("\nForce exiting the program")
+    # This bypasses normal exit procedures and immediately kills the process
+    os._exit(1) 
 
 # --- Optuna Import ---
 OPTUNA_AVAILABLE = False
@@ -163,6 +203,53 @@ def load_projections_from_csvs(models_dir, league_settings, evaluation_year=None
         return final_df
     except Exception as concat_err: rl_logger.error(f"Final concat/cleanup err: {concat_err}", exc_info=True); return pd.DataFrame()
 
+
+def _init_worker(instance_config, study_name, storage_path):
+    """Initialize each worker process with the necessary data"""
+    global _GLOBAL_INSTANCE
+    
+    
+    # Create a new instance with the same config
+    _GLOBAL_INSTANCE = RLPipeline(config=instance_config)
+    
+    # Set study information
+    _GLOBAL_INSTANCE._current_study_name = study_name
+    _GLOBAL_INSTANCE._current_storage_path = storage_path
+    
+
+def _run_optuna_trial_in_process(trial_id):
+    """Standalone function that runs a single Optuna trial in a separate process."""
+    global _GLOBAL_INSTANCE
+    
+    pid = os.getpid()
+    
+    if _GLOBAL_INSTANCE is None:
+        return trial_id, float("inf"), pid
+    
+    # Get access to the instance's configuration and logger
+    self = _GLOBAL_INSTANCE
+    
+    try:
+        # Create a trial and run it
+        study = optuna.load_study(
+            study_name=self._current_study_name,
+            storage=self._current_storage_path
+        )
+        
+        trial = study.ask()
+        
+        # Run the objective function
+        value = self._optuna_objective(trial)
+        
+        # Report the result
+        study.tell(trial, value)
+        
+        return trial_id, value, pid
+        
+    except Exception as e:
+        traceback.print_exc()
+        return trial_id, float("inf"), pid
+
 # --- RLPipeline Class ---
 class RLPipeline:
     """Handles the RL training process, including Optuna HPO."""
@@ -177,11 +264,115 @@ class RLPipeline:
         if OPTUNA_AVAILABLE and TrialEvalCallback is None:
              self.rl_logger.warning("Optuna is available but TrialEvalCallback failed to import. Optuna HPO will likely fail.")
 
+    def _setup_worker_logging(self, config, pid):
+        """Configures logging specifically for a worker process."""
+        log_config = config.get('logging', {})
+        log_level_file = log_config.get('level', 'INFO').upper()
+        log_file_base = log_config.get('file', 'fantasy_football.log')
+        console_log_level = 'WARNING' # Keep console less noisy for workers
+
+        # --- Create PID-specific filename in PID_logs folder ---
+        log_file = None
+        if log_file_base:
+            # Determine the base path and filename
+            orig_log_dir = os.path.dirname(log_file_base)
+            base_filename = os.path.basename(log_file_base)
+            base, ext = os.path.splitext(base_filename)
+            
+            # Create the PID_logs directory path
+            pid_logs_dir = os.path.join(orig_log_dir, "PID_logs") if orig_log_dir else "PID_logs"
+            
+            # Ensure PID_logs directory exists
+            os.makedirs(pid_logs_dir, exist_ok=True)
+            
+            # Create the full path for the PID-specific log file
+            log_file = os.path.join(pid_logs_dir, f"{base}_pid{pid}{ext}")
+        # -----------------------------------------------------
+
+        # Define worker's file handler config
+        worker_file_handler_config = None
+        if log_file:
+            # Minimal check for writability
+            write_target_dir = os.path.dirname(log_file)
+            if os.access(write_target_dir, os.W_OK):
+                worker_file_handler_config = {
+                'level': log_level_file,
+                'class': 'logging.FileHandler',
+                'formatter': 'standard',
+                'filename': log_file,
+                'mode': 'a',
+                }
+            else:
+                print(f"ERROR: Worker (PID {pid}) cannot write to log directory '{write_target_dir}'. Disabling file log for worker.")
+
+        # Define the logging dict *for the worker*
+        worker_logging_dict = {
+            'version': 1,
+            'disable_existing_loggers': False, # Let it use existing logger names
+            'formatters': { # Define formatter needed by handlers
+                'standard': {
+                    'format': '%(asctime)s - %(process)d - %(name)s - %(levelname)s - %(message)s',
+                    'datefmt': '%Y-%m-%d %H:%M:%S',
+                },
+            },
+            'handlers': {
+                # Console handler (optional for workers, could be removed to reduce clutter)
+                'console': {
+                    'level': console_log_level,
+                    'class': 'logging.StreamHandler',
+                    'formatter': 'standard',
+                    'stream': sys.stdout, # Or sys.stderr
+                },
+                # Worker-specific file handler
+                 **({'worker_file': worker_file_handler_config} if worker_file_handler_config else {}),
+                 # Null handler for Optuna/other libraries if needed
+                 'null': {'class': 'logging.NullHandler'},
+            },
+            'loggers': {
+                 # Configure ONLY the loggers used within the worker/env/SB3
+                 # Route them to the worker's specific file handler + console
+                 'fantasy_draft_rl': {
+                     'handlers': ['console'] + (['worker_file'] if worker_file_handler_config else []),
+                     'level': log_level_file, # Use detailed level for worker file
+                     'propagate': False,
+                 },
+                 # Silence Optuna within worker too
+                 'optuna': {'handlers': ['null'], 'level': 'CRITICAL', 'propagate': False},
+                 # Optionally configure SB3 logger for worker if needed
+                 'stable_baselines3': {'handlers': ['console'] + (['worker_file'] if worker_file_handler_config else []), 'level': 'WARNING', 'propagate': False},
+                 # Add other loggers used inside the objective if necessary
+            },
+            # Keep root minimal in worker too
+            'root': {'level': 'CRITICAL', 'handlers': []}
+        }
+        try:
+            logging.config.dictConfig(worker_logging_dict)
+        except Exception as e:
+            # Fallback to basic config for this worker if dictConfig fails
+            logging.basicConfig(level=logging.WARNING, format=f'%(asctime)s - {pid} - %(name)s - %(levelname)s - %(message)s')
+
+    
 
     # Optuna Objective Function
     def _optuna_objective(self, trial) -> float:
         """Objective function for Optuna HPO. Returns negative mean reward."""
+        pid = os.getpid() # Get current worker PID
+        # --- Configure Worker Logging ---
+        self._setup_worker_logging(self.config, pid)
+        # Now use self.rl_logger safely within this worker
+        self.rl_logger.info(f"--- Starting Optuna Trial {trial.number} (PID {pid}) ---")
         self.rl_logger.info(f"\n--- Starting Optuna Trial {trial.number} ---")
+        
+        # --- Set PyTorch Threads  ---
+        try:
+            num_threads = 1
+            torch.set_num_threads(num_threads)
+            # Optional but good practice: Limit inter-op parallelism too
+            # torch.set_num_interop_threads(num_threads)
+            self.rl_logger.debug(f"Optuna Trial {trial.number}: Set torch.set_num_threads({num_threads})")
+        except Exception as torch_err:
+            self.rl_logger.error(f"Optuna Trial {trial.number}: Failed to set PyTorch threads: {torch_err}")
+        # --------------------------------------------------------
         trial_env = None # For finally block
         eval_trial_env = None # For finally block
         model = None # For logging params
@@ -292,7 +483,6 @@ class RLPipeline:
             trial_timesteps = optuna_cfg.get('trial_timesteps', 100000)
             mean_reward = -np.inf
             self.rl_logger.info(f"Optuna Trial {trial.number}: Starting training for {trial_timesteps} timesteps...")
-            print(f"Optuna Trial {trial.number}: Starting training for {trial_timesteps} timesteps...")
             try:
                 model.learn(total_timesteps=trial_timesteps, callback=eval_callback, progress_bar=False) # Progress bar off for trials
                 mean_reward = eval_callback.get_last_mean_reward()
@@ -326,6 +516,8 @@ class RLPipeline:
 
     def run(self):
         """Executes the RL training pipeline, optionally running HPO first."""
+        signal.signal(signal.SIGINT, kill_all_children_and_exit)
+        signal.signal(signal.SIGTERM, kill_all_children_and_exit)
         target_year = self.config.get('projections', {}).get('projection_year', 2024)
         is_training_run = self.config.get('rl_training', {}).get('enabled', False)
 
@@ -389,78 +581,218 @@ class RLPipeline:
         optuna_cfg = self.config.get('rl_training', {}).get('optuna', {})
         run_optuna = optuna_cfg.get('enabled', False)
 
+        # if run_optuna:
+        #     if not OPTUNA_AVAILABLE:
+        #         self.rl_logger.error("Optuna is enabled but not installed. Skipping HPO.")
+        #     elif TrialEvalCallback is None:
+        #          self.rl_logger.error("Optuna is enabled but TrialEvalCallback is not available. Skipping HPO.")
+        #     else:
+        #         self.rl_logger.info("--- Starting Optuna Hyperparameter Optimization (Parallel) ---")
+        #         n_trials = optuna_cfg.get('n_trials', 50)
+        #         timeout_seconds = optuna_cfg.get('timeout_seconds', 26 * 3600)
+        #         study_name = f"ppo-fantasy-draft-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+
+        #         # --- Setup Persistent Storage (SQLite example) ---
+        #         storage_db_dir = os.path.join(self.config['paths']['output_dir'], 'optuna_db')
+        #         os.makedirs(storage_db_dir, exist_ok=True)
+        #         storage_path = f"sqlite:///{os.path.join(storage_db_dir, f'{study_name}.db')}"
+        #         self.rl_logger.info(f"Using Optuna storage: {storage_path}")
+        #         # ------------------------------------------------
+
+        #         pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=3, interval_steps=1)
+
+        #         study = optuna.create_study(
+        #             study_name=study_name,
+        #             storage=storage_path, # Use the database storage
+        #             direction="minimize",
+        #             pruner=pruner,
+        #             load_if_exists=True # Load previous results if study name/db exists
+        #         )
+
+        #         # --- Determine number of parallel jobs ---
+        #         n_jobs = 2 #optuna_cfg.get('n_jobs', -1) # Default to all cores if not specified
+        #         if n_jobs == -1:
+        #             # import multiprocessing
+        #             n_jobs = multiprocessing.cpu_count()
+        #             self.rl_logger.info(f"Using n_jobs=-1, detected {n_jobs} CPU cores.")
+        #         else:
+        #             self.rl_logger.info(f"Using n_jobs={n_jobs} based on config.")
+        #         # -----------------------------------------
+
+        #         self.rl_logger.info(f"Running Optuna optimization in PARALLEL with n_jobs={n_jobs} for {n_trials} trials (timeout {timeout_seconds}s)...")
+
+
+        #         # Create a shared counter for tracking trials
+        #         trial_counter = multiprocessing.Value('i', 0)
+
+        #         def run_trial_in_separate_process():
+        #             """Independent process function that creates and runs its own trial"""
+        #             # Get a unique trial ID
+        #             with trial_counter.get_lock():
+        #                 trial_id = trial_counter.value
+        #                 trial_counter.value += 1
+                    
+        #             pid = os.getpid()
+        #             print(f"Process {pid} starting trial {trial_id}")
+                    
+        #             # Create a new trial
+        #             trial = study.ask()
+                    
+        #             try:
+        #                 # This calls your existing objective function
+        #                 value = self._optuna_objective(trial)
+        #                 # Report result back to study
+        #                 study.tell(trial, value)
+        #                 return (trial_id, value, pid)
+        #             except Exception as e:
+        #                 print(f"Error in trial {trial_id} (PID {pid}): {e}")
+        #                 study.tell(trial, float("inf"))
+        #                 return (trial_id, float("inf"), pid)
+
+        #         try:
+        #             # Use ProcessPoolExecutor to explicitly create separate processes
+        #             completed_trials = []
+                    
+        #             with concurrent.futures.ProcessPoolExecutor(max_workers=n_jobs) as executor:
+        #                 # Submit all trial jobs
+        #                 futures = [executor.submit(run_trial_in_separate_process) for _ in range(n_trials)]
+                        
+        #                 # Process results as they complete
+        #                 for future in concurrent.futures.as_completed(futures):
+        #                     try:
+        #                         trial_id, value, pid = future.result()
+        #                         completed_trials.append((trial_id, value))
+        #                         self.rl_logger.info(f"Trial {trial_id} completed by process {pid} with value: {value}")
+        #                     except Exception as exc:
+        #                         self.rl_logger.error(f"Trial execution failed: {exc}")
+                    
+        #             self.rl_logger.info(f"All {len(completed_trials)} trials completed.")
+                    
+        #             # --- Save the study object itself ---
+        #             study_save_path = os.path.join(self.config['paths']['output_dir'], f'{study_name}_study.pkl')
+        #             try:
+        #                 joblib.dump(study, study_save_path)
+        #                 self.rl_logger.info(f"Saved Optuna study object to: {study_save_path}")
+        #             except Exception as study_save_err:
+        #                 self.rl_logger.error(f"Failed to save Optuna study object: {study_save_err}")
+
+        #             if study.best_trial:
+        #                 # ... (process best_hyperparams as before) ...
+        #                 self.rl_logger.info(f"Optuna (Parallel) finished. Best Trial: {study.best_trial.number}, Value: {study.best_value:.4f}")
+        #                 self.rl_logger.info(f"Using Optuna Best Hyperparameters: {best_hyperparams}")
+        #             else:
+        #                 self.rl_logger.warning("Optuna (Parallel) finished, but no best trial found. Using defaults.")
+
+        #         except Exception as opt_err:
+        #             self.rl_logger.error(f"Optuna parallel optimization failed: {opt_err}", exc_info=True)
+        #             self.rl_logger.warning("Proceeding with default hyperparameters.")
+        # else:
+        #     self.rl_logger.info("Optuna hyperparameter optimization disabled.")
+
+
         if run_optuna:
-            if not OPTUNA_AVAILABLE:
-                self.rl_logger.error("Optuna is enabled but not installed. Skipping HPO.")
-            elif TrialEvalCallback is None:
-                 self.rl_logger.error("Optuna is enabled but TrialEvalCallback is not available. Skipping HPO.")
+            self.rl_logger.info("--- Starting Optuna Hyperparameter Optimization (Parallel) ---")
+            n_trials = optuna_cfg.get('n_trials', 50)
+            timeout_seconds = optuna_cfg.get('timeout_seconds', 26 * 3600)
+            study_name = f"ppo-fantasy-draft-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+
+            # --- Setup Persistent Storage (SQLite example) ---
+            storage_db_dir = os.path.join(self.config['paths']['output_dir'], 'optuna_db')
+            os.makedirs(storage_db_dir, exist_ok=True)
+            storage_path = f"sqlite:///{os.path.join(storage_db_dir, f'{study_name}.db')}"
+            self.rl_logger.info(f"Using Optuna storage: {storage_path}")
+
+            # Store study information for worker processes
+            self._current_study_name = study_name
+            self._current_storage_path = storage_path
+
+            # Initialize the global instance reference
+            global _GLOBAL_INSTANCE
+            _GLOBAL_INSTANCE = self
+
+            # Create the study
+            pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=3, interval_steps=1)
+            study = optuna.create_study(
+                study_name=study_name,
+                storage=storage_path,
+                direction="minimize",
+                pruner=pruner,
+                load_if_exists=True
+            )
+
+            # --- Determine number of parallel jobs ---
+            n_jobs = optuna_cfg.get('n_jobs', -1)
+            if n_jobs == -1:
+                n_jobs = multiprocessing.cpu_count()
+                self.rl_logger.info(f"Using n_jobs=-1, detected {n_jobs} CPU cores.")
             else:
-                self.rl_logger.info("--- Starting Optuna Hyperparameter Optimization (Parallel) ---")
-                n_trials = optuna_cfg.get('n_trials', 50)
-                timeout_seconds = optuna_cfg.get('timeout_seconds', 26 * 3600)
-                study_name = f"ppo-fantasy-draft-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                self.rl_logger.info(f"Using n_jobs={n_jobs} based on config.")
 
-                # --- Setup Persistent Storage (SQLite example) ---
-                storage_db_dir = os.path.join(self.config['paths']['output_dir'], 'optuna_db')
-                os.makedirs(storage_db_dir, exist_ok=True)
-                storage_path = f"sqlite:///{os.path.join(storage_db_dir, f'{study_name}.db')}"
-                self.rl_logger.info(f"Using Optuna storage: {storage_path}")
-                # ------------------------------------------------
+            self.rl_logger.info(f"Running Optuna optimization in PARALLEL with n_jobs={n_jobs} for {n_trials} trials (timeout {timeout_seconds}s)...")
 
-                pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=3, interval_steps=1)
+            try:
+                progress_bar = tqdm(total=n_trials, desc="Optuna Trials", unit="trial")
 
-                study = optuna.create_study(
-                    study_name=study_name,
-                    storage=storage_path, # Use the database storage
-                    direction="minimize",
-                    pruner=pruner,
-                    load_if_exists=True # Load previous results if study name/db exists
-                )
-
-                # --- Determine number of parallel jobs ---
-                n_jobs = optuna_cfg.get('n_jobs', -1) # Default to all cores if not specified
-                if n_jobs == -1:
-                    # import multiprocessing
-                    n_jobs = multiprocessing.cpu_count()
-                    self.rl_logger.info(f"Using n_jobs=-1, detected {n_jobs} CPU cores.")
-                else:
-                    self.rl_logger.info(f"Using n_jobs={n_jobs} based on config.")
-                # -----------------------------------------
-
-                self.rl_logger.info(f"Running Optuna optimization in PARALLEL with n_jobs={n_jobs} for {n_trials} trials (timeout {timeout_seconds}s)...")
-
+                # Use ProcessPoolExecutor for true parallelization
+                completed_trials = []
+                
+                with concurrent.futures.ProcessPoolExecutor(
+                    max_workers=n_jobs,
+                    initializer=_init_worker,
+                    initargs=(self.config, study_name, storage_path)
+                ) as executor:
+                    # Submit all trial jobs - use the module-level function
+                    futures = [executor.submit(_run_optuna_trial_in_process, i) for i in range(n_trials)]
+                    
+                    # Process results as they complete
+                    for future in concurrent.futures.as_completed(futures):
+                        try:
+                            trial_id, value, pid = future.result()
+                            completed_trials.append((trial_id, value))
+                            self.rl_logger.info(f"Trial {trial_id} completed by process {pid} with value: {value}")
+                            
+                            # Update the progress bar
+                            progress_bar.update(1)
+                            progress_bar.set_postfix({"best": f"{study.best_value:.4f}" if study.best_trial else "None"})
+                        except Exception as exc:
+                            self.rl_logger.error(f"Trial execution failed: {exc}")
+                            progress_bar.update(1)
+                progress_bar.close()
+                self.rl_logger.info(f"All {len(completed_trials)} trials completed.")
+                
+                # --- Save the study object itself ---
+                study_save_path = os.path.join(self.config['paths']['output_dir'], f'{study_name}_study.pkl')
                 try:
-                    # *** Run optimize with n_jobs ***
-                    study.optimize(
-                        self._optuna_objective,
-                        n_trials=n_trials,
-                        timeout=timeout_seconds,
-                        n_jobs=n_jobs, # <= Specify parallel processes here
-                        gc_after_trial=True # Optional: Helps manage memory
-                    )
-                    # *** ------------------------ ***
+                    joblib.dump(study, study_save_path)
+                    self.rl_logger.info(f"Saved Optuna study object to: {study_save_path}")
+                except Exception as study_save_err:
+                    self.rl_logger.error(f"Failed to save Optuna study object: {study_save_err}")
 
-                    # --- Save the study object itself ---
-                    study_save_path = os.path.join(self.config['paths']['output_dir'], f'{study_name}_study.pkl')
-                    try:
-                        joblib.dump(study, study_save_path)
-                        self.rl_logger.info(f"Saved Optuna study object to: {study_save_path}")
-                    except Exception as study_save_err:
-                        self.rl_logger.error(f"Failed to save Optuna study object: {study_save_err}")
-                    # ----------------------------------
+                if study.best_trial:
+                    # Process best parameters
+                    tuned_params = study.best_params.copy()
+                    if 'policy_kwargs_net_arch' in tuned_params:
+                        arch_choice = tuned_params.pop('policy_kwargs_net_arch')
+                        try:
+                            pi_str, vf_str = arch_choice.split('_')
+                            pi_layers = [int(x) for x in pi_str.split('=')[1].split(',')]
+                            vf_layers = [int(x) for x in vf_str.split('=')[1].split(',')]
+                            best_hyperparams['policy_kwargs'] = dict(net_arch=[dict(pi=pi_layers, vf=vf_layers)])
+                        except Exception as parse_err:
+                            self.rl_logger.error(f"Error parsing net_arch '{arch_choice}': {parse_err}")
+                    
+                    best_hyperparams.update(tuned_params)
+                    self.rl_logger.info(f"Optuna (Parallel) finished. Best Trial: {study.best_trial.number}, Value: {study.best_value:.4f}")
+                    self.rl_logger.info(f"Using Optuna Best Hyperparameters: {best_hyperparams}")
+                else:
+                    self.rl_logger.warning("Optuna (Parallel) finished, but no best trial found. Using defaults.")
 
-                    if study.best_trial:
-                        # ... (process best_hyperparams as before) ...
-                        self.rl_logger.info(f"Optuna (Parallel) finished. Best Trial: {study.best_trial.number}, Value: {study.best_value:.4f}")
-                        self.rl_logger.info(f"Using Optuna Best Hyperparameters: {best_hyperparams}")
-                    else:
-                        self.rl_logger.warning("Optuna (Parallel) finished, but no best trial found. Using defaults.")
-
-                except Exception as opt_err:
-                    self.rl_logger.error(f"Optuna parallel optimization failed: {opt_err}", exc_info=True)
-                    self.rl_logger.warning("Proceeding with default hyperparameters.")
+            except Exception as opt_err:
+                kill_all_children_and_exit()
+                self.rl_logger.error(f"Optuna parallel optimization failed: {opt_err}", exc_info=True)
+                self.rl_logger.warning("Proceeding with default hyperparameters.")
         else:
-            self.rl_logger.info("Optuna hyperparameter optimization disabled.")
+            self.rl_logger.info("--- No Optuna Optimization Requested ---")
 
         # --- Final Training Run ---
         # self.rl_logger.info("--- Starting Final RL Agent Training ---")

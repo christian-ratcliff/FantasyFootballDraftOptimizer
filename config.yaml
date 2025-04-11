@@ -73,6 +73,8 @@ rl_training:
     enabled: true    # Set true to run Optuna HPO *before* final training
     n_trials: 100              # Number of Optuna trials
     trial_timesteps: 65536   # Timesteps per Optuna trial
+    timeout_seconds: 86400    #How long to run trials before it kills itself
+    n_jobs: 5               # How many processes to spin up (set to -1 to use all of your computers available)
     # Define parameter search spaces (adjust ranges as needed)
     search_space:
       learning_rate:

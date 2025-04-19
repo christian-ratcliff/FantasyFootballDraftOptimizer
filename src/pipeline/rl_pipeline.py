@@ -40,9 +40,8 @@ import psutil
 
 _GLOBAL_INSTANCE = None
 
-
+# Was having issue wth CTRL+C not working, this fixes it
 def kill_all_children_and_exit(sig=None, frame=None):
-    """Kill all child processes and exit forcefully"""
     print("\n\nFORCE TERMINATING ALL PROCESSES")
     
     # Get the current process
@@ -56,12 +55,9 @@ def kill_all_children_and_exit(sig=None, frame=None):
         except:
             pass
     
-    # Exit immediately without cleanup
     os._exit(1)
 
 def force_exit_handler(sig, frame):
-    print("\nForce exiting the program")
-    # This bypasses normal exit procedures and immediately kills the process
     os._exit(1) 
 
 # --- Optuna Import ---
@@ -92,19 +88,19 @@ except ImportError:
 try:
     from src.models.rl_draft_agent import FantasyDraftEnv, NUM_ACTIONS, ACTION_BEST_AVAILABLE
 except ImportError:
-     FantasyDraftEnv = None
-     NUM_ACTIONS = 6
-     ACTION_BEST_AVAILABLE = 5
-     SB3_AVAILABLE = False
-     logging.getLogger("fantasy_draft_rl").error("Could not import FantasyDraftEnv or constants. RL Pipeline disabled.")
+    FantasyDraftEnv = None
+    NUM_ACTIONS = 6
+    ACTION_BEST_AVAILABLE = 5
+    SB3_AVAILABLE = False
+    logging.getLogger("fantasy_draft_rl").error("Could not import FantasyDraftEnv or constants. RL Pipeline disabled.")
 
 # --- Custom Callback Import ---
 # Assuming callback is in src/models/callback.py based on user's import
 try:
     from src.models.callback import TrialEvalCallback
 except ImportError:
-     TrialEvalCallback = None # Set to None if import fails
-     logging.getLogger("fantasy_draft_rl").warning("TrialEvalCallback not found or failed import. Optuna HPO might not function correctly.")
+    TrialEvalCallback = None # Set to None if import fails
+    logging.getLogger("fantasy_draft_rl").warning("TrialEvalCallback not found or failed import. Optuna HPO might not function correctly.")
 
 
 # --- Helper Functions ---
@@ -130,19 +126,19 @@ def load_league_settings(config_path='configs/league_settings.json'):
             settings = json.load(f)
         logger_init.info(f"Loaded league settings from {config_path}")
         if 'league_info' not in settings or 'starter_limits' not in settings:
-             raise ValueError("League settings JSON missing required keys ('league_info', 'starter_limits').")
+            raise ValueError("League settings JSON missing required keys ('league_info', 'starter_limits').")
         if 'team_count' not in settings['league_info']:
-             raise ValueError("League settings JSON missing 'team_count' in 'league_info'.")
+            raise ValueError("League settings JSON missing 'team_count' in 'league_info'.")
         return settings
     except FileNotFoundError:
-         logger_init.error(f"League settings file not found: {config_path}")
-         raise
+        logger_init.error(f"League settings file not found: {config_path}")
+        raise
     except json.JSONDecodeError as e:
-         logger_init.error(f"Error decoding JSON from league settings file {config_path}: {e}")
-         raise
+        logger_init.error(f"Error decoding JSON from league settings file {config_path}: {e}")
+        raise
     except ValueError as e:
-         logger_init.error(f"Invalid league settings structure in {config_path}: {e}")
-         raise
+        logger_init.error(f"Invalid league settings structure in {config_path}: {e}")
+        raise
     except Exception as e:
         logger_init.error(f"Unexpected error loading league settings file {config_path}: {e}")
         raise
@@ -170,9 +166,9 @@ def load_projections_from_csvs(models_dir, league_settings, evaluation_year=None
             df_processed['position'] = df_processed['position'].astype(str).str.upper();
             if (df_processed['position'] != pos.upper()).any(): df_processed['position'] = pos.upper()
             if 'name' not in df_processed or df_processed['name'].isnull().any():
-                 df_processed['player_id_str'] = df_processed['player_id'].astype(str)
-                 df_processed['name'] = df_processed['player_id_str'].map(player_map).fillna("Unknown_" + df_processed['player_id_str'])
-                 df_processed.drop(columns=['player_id_str'], inplace=True)
+                df_processed['player_id_str'] = df_processed['player_id'].astype(str)
+                df_processed['name'] = df_processed['player_id_str'].map(player_map).fillna("Unknown_" + df_processed['player_id_str'])
+                df_processed.drop(columns=['player_id_str'], inplace=True)
             else: df_processed['name'] = df_processed['name'].astype(str)
             df_processed['age'] = pd.to_numeric(df_processed['age'], errors='coerce').fillna(27).astype(int)
             try:
@@ -262,7 +258,7 @@ class RLPipeline:
             self.logger.error("Missing RL dependencies or FantasyDraftEnv. RL Pipeline is disabled.")
             raise ImportError("RL dependencies or FantasyDraftEnv missing.")
         if OPTUNA_AVAILABLE and TrialEvalCallback is None:
-             self.rl_logger.warning("Optuna is available but TrialEvalCallback failed to import. Optuna HPO will likely fail.")
+            self.rl_logger.warning("Optuna is available but TrialEvalCallback failed to import. Optuna HPO will likely fail.")
 
     def _setup_worker_logging(self, config, pid):
         """Configures logging specifically for a worker process."""
@@ -324,23 +320,23 @@ class RLPipeline:
                     'stream': sys.stdout, # Or sys.stderr
                 },
                 # Worker-specific file handler
-                 **({'worker_file': worker_file_handler_config} if worker_file_handler_config else {}),
-                 # Null handler for Optuna/other libraries if needed
-                 'null': {'class': 'logging.NullHandler'},
+                **({'worker_file': worker_file_handler_config} if worker_file_handler_config else {}),
+                # Null handler for Optuna/other libraries if needed
+                'null': {'class': 'logging.NullHandler'},
             },
             'loggers': {
-                 # Configure ONLY the loggers used within the worker/env/SB3
-                 # Route them to the worker's specific file handler + console
-                 'fantasy_draft_rl': {
-                     'handlers': ['console'] + (['worker_file'] if worker_file_handler_config else []),
-                     'level': log_level_file, # Use detailed level for worker file
-                     'propagate': False,
-                 },
-                 # Silence Optuna within worker too
-                 'optuna': {'handlers': ['null'], 'level': 'CRITICAL', 'propagate': False},
-                 # Optionally configure SB3 logger for worker if needed
-                 'stable_baselines3': {'handlers': ['console'] + (['worker_file'] if worker_file_handler_config else []), 'level': 'WARNING', 'propagate': False},
-                 # Add other loggers used inside the objective if necessary
+                # Configure ONLY the loggers used within the worker/env/SB3
+                # Route them to the worker's specific file handler + console
+                'fantasy_draft_rl': {
+                    'handlers': ['console'] + (['worker_file'] if worker_file_handler_config else []),
+                    'level': log_level_file, # Use detailed level for worker file
+                    'propagate': False,
+                },
+                # Silence Optuna within worker too
+                'optuna': {'handlers': ['null'], 'level': 'CRITICAL', 'propagate': False},
+                # Optionally configure SB3 logger for worker if needed
+                'stable_baselines3': {'handlers': ['console'] + (['worker_file'] if worker_file_handler_config else []), 'level': 'WARNING', 'propagate': False},
+                # Add other loggers used inside the objective if necessary
             },
             # Keep root minimal in worker too
             'root': {'level': 'CRITICAL', 'handlers': []}
@@ -367,8 +363,6 @@ class RLPipeline:
         try:
             num_threads = 1
             torch.set_num_threads(num_threads)
-            # Optional but good practice: Limit inter-op parallelism too
-            # torch.set_num_interop_threads(num_threads)
             self.rl_logger.debug(f"Optuna Trial {trial.number}: Set torch.set_num_threads({num_threads})")
         except Exception as torch_err:
             self.rl_logger.error(f"Optuna Trial {trial.number}: Failed to set PyTorch threads: {torch_err}")
@@ -379,8 +373,8 @@ class RLPipeline:
 
         # Check if TrialEvalCallback is available before proceeding
         if TrialEvalCallback is None:
-             self.rl_logger.error("TrialEvalCallback is not available. Cannot run Optuna trial.")
-             return float('inf') # Return high penalty
+            self.rl_logger.error("TrialEvalCallback is not available. Cannot run Optuna trial.")
+            return float('inf') # Return high penalty
 
         try:
             # --- Load Data ---
@@ -397,26 +391,26 @@ class RLPipeline:
             ppo_params = self.config.get('rl_training', {}).get('ppo_hyperparams', {}).copy()
             tuned_params = {}
             for param, settings in search_space.items():
-                 if param == 'policy_kwargs': continue
-                 try:
-                     if settings['type'] == 'loguniform': tuned_params[param] = trial.suggest_float(param, settings['low'], settings['high'], log=True)
-                     elif settings['type'] == 'uniform': tuned_params[param] = trial.suggest_float(param, settings['low'], settings['high'])
-                     elif settings['type'] == 'int': tuned_params[param] = trial.suggest_int(param, settings['low'], settings['high'])
-                     elif settings['type'] == 'categorical': tuned_params[param] = trial.suggest_categorical(param, settings['choices'])
-                 except Exception as suggest_err:
-                     self.rl_logger.warning(f"Optuna Trial {trial.number}: Error suggesting param '{param}': {suggest_err}. Using default.")
+                if param == 'policy_kwargs': continue
+                try:
+                    if settings['type'] == 'loguniform': tuned_params[param] = trial.suggest_float(param, settings['low'], settings['high'], log=True)
+                    elif settings['type'] == 'uniform': tuned_params[param] = trial.suggest_float(param, settings['low'], settings['high'])
+                    elif settings['type'] == 'int': tuned_params[param] = trial.suggest_int(param, settings['low'], settings['high'])
+                    elif settings['type'] == 'categorical': tuned_params[param] = trial.suggest_categorical(param, settings['choices'])
+                except Exception as suggest_err:
+                    self.rl_logger.warning(f"Optuna Trial {trial.number}: Error suggesting param '{param}': {suggest_err}. Using default.")
             ppo_params.update(tuned_params)
 
             if 'policy_kwargs_net_arch' in search_space:
-                 try:
-                     arch_choice = trial.suggest_categorical('policy_kwargs_net_arch', search_space['policy_kwargs_net_arch']['choices'])
-                     pi_str, vf_str = arch_choice.split('_')
-                     pi_layers = [int(x) for x in pi_str.split('=')[1].split(',')]
-                     vf_layers = [int(x) for x in vf_str.split('=')[1].split(',')]
-                     ppo_params['policy_kwargs'] = dict(net_arch=[dict(pi=pi_layers, vf=vf_layers)])
-                 except Exception as arch_err:
-                     self.rl_logger.warning(f"Optuna Trial {trial.number}: Error parsing net_arch '{arch_choice}': {arch_err}. Using default policy_kwargs.")
-                     ppo_params['policy_kwargs'] = self.config.get('rl_training', {}).get('ppo_hyperparams', {}).get('policy_kwargs')
+                try:
+                    arch_choice = trial.suggest_categorical('policy_kwargs_net_arch', search_space['policy_kwargs_net_arch']['choices'])
+                    pi_str, vf_str = arch_choice.split('_')
+                    pi_layers = [int(x) for x in pi_str.split('=')[1].split(',')]
+                    vf_layers = [int(x) for x in vf_str.split('=')[1].split(',')]
+                    ppo_params['policy_kwargs'] = dict(net_arch=[dict(pi=pi_layers, vf=vf_layers)])
+                except Exception as arch_err:
+                    self.rl_logger.warning(f"Optuna Trial {trial.number}: Error parsing net_arch '{arch_choice}': {arch_err}. Using default policy_kwargs.")
+                    ppo_params['policy_kwargs'] = self.config.get('rl_training', {}).get('ppo_hyperparams', {}).get('policy_kwargs')
             elif 'policy_kwargs' not in ppo_params:
                 ppo_params['policy_kwargs'] = None
 
@@ -428,11 +422,11 @@ class RLPipeline:
                 # DEBUG: Log before creating env factory
                 self.rl_logger.debug(f"Optuna Trial {trial.number}: Defining make_trial_env_func...")
                 def make_trial_env_func():
-                     self.rl_logger.debug(f"Optuna Trial {trial.number}: make_trial_env_func called - Creating FantasyDraftEnv instance...")
-                     # Pass copy to prevent modifications across processes/trials
-                     env_instance = FantasyDraftEnv(projections_df.copy(), league_settings, agent_draft_pos)
-                     self.rl_logger.debug(f"Optuna Trial {trial.number}: FantasyDraftEnv instance created.")
-                     return env_instance
+                    self.rl_logger.debug(f"Optuna Trial {trial.number}: make_trial_env_func called - Creating FantasyDraftEnv instance...")
+                    # Pass copy to prevent modifications across processes/trials
+                    env_instance = FantasyDraftEnv(projections_df.copy(), league_settings, agent_draft_pos)
+                    self.rl_logger.debug(f"Optuna Trial {trial.number}: FantasyDraftEnv instance created.")
+                    return env_instance
 
                 self.rl_logger.debug(f"Optuna Trial {trial.number}: Creating DummyVecEnv...")
                 trial_env = DummyVecEnv([make_trial_env_func]) # Training env VecEnv
@@ -451,32 +445,32 @@ class RLPipeline:
 
             # --- Define Model for Trial ---
             try:
-                 self.rl_logger.debug(f"Optuna Trial {trial.number}: >>> BEFORE PPO Initialization <<<")
-                 # --- TEMPORARY DEBUG --- Add a small sleep
-                 # time.sleep(0.5)
-                 # --- END TEMPORARY DEBUG ---
-                 model = PPO(policy="MlpPolicy", env=trial_env, verbose=2, # Set verbose=0 for Optuna trials
+                self.rl_logger.debug(f"Optuna Trial {trial.number}: >>> BEFORE PPO Initialization <<<")
+                # --- TEMPORARY DEBUG --- Add a small sleep
+                # time.sleep(0.5)
+                # --- END TEMPORARY DEBUG ---
+                model = PPO(policy="MlpPolicy", env=trial_env, verbose=2, # Set verbose=0 for Optuna trials
                             tensorboard_log=None, # Disable TB logging for individual trials
-                             **ppo_params)
-                 self.rl_logger.debug(f"Optuna Trial {trial.number}: >>> AFTER PPO Initialization <<<")
-                 self.rl_logger.debug(f"Optuna Trial {trial.number}: PPO model defined successfully.")
+                            **ppo_params)
+                self.rl_logger.debug(f"Optuna Trial {trial.number}: >>> AFTER PPO Initialization <<<")
+                self.rl_logger.debug(f"Optuna Trial {trial.number}: PPO model defined successfully.")
             except Exception as model_err:
-                 self.rl_logger.error(f"Optuna Trial {trial.number}: Failed during PPO model definition: {model_err}", exc_info=True)
-                 # Attempt to close envs even if model definition fails
-                 if trial_env: trial_env.close()
-                 if eval_trial_env: eval_trial_env.close()
-                 return float('inf') # Penalize trial
+                self.rl_logger.error(f"Optuna Trial {trial.number}: Failed during PPO model definition: {model_err}", exc_info=True)
+                # Attempt to close envs even if model definition fails
+                if trial_env: trial_env.close()
+                if eval_trial_env: eval_trial_env.close()
+                return float('inf') # Penalize trial
 
             # --- Setup Evaluation Callback for Trial ---
             try:
-                 self.rl_logger.debug(f"Optuna Trial {trial.number}: >>> BEFORE Callback Initialization <<<")
-                 eval_freq = int(ppo_params.get('n_steps', 2048) * 3)
-                 eval_callback = TrialEvalCallback(eval_trial_env, trial, n_eval_episodes=5, eval_freq=eval_freq, verbose=2) # Keep verbose low for callback
-                 self.rl_logger.debug(f"Optuna Trial {trial.number}: >>> AFTER Callback Initialization <<<")
-                 self.rl_logger.debug(f"Optuna Trial {trial.number}: TrialEvalCallback setup complete.")
+                self.rl_logger.debug(f"Optuna Trial {trial.number}: >>> BEFORE Callback Initialization <<<")
+                eval_freq = int(ppo_params.get('n_steps', 2048) * 3)
+                eval_callback = TrialEvalCallback(eval_trial_env, trial, n_eval_episodes=5, eval_freq=eval_freq, verbose=2) # Keep verbose low for callback
+                self.rl_logger.debug(f"Optuna Trial {trial.number}: >>> AFTER Callback Initialization <<<")
+                self.rl_logger.debug(f"Optuna Trial {trial.number}: TrialEvalCallback setup complete.")
             except Exception as cb_err:
-                 self.rl_logger.error(f"Optuna Trial {trial.number}: Failed to setup TrialEvalCallback: {cb_err}", exc_info=True)
-                 return float('inf')
+                self.rl_logger.error(f"Optuna Trial {trial.number}: Failed to setup TrialEvalCallback: {cb_err}", exc_info=True)
+                return float('inf')
 
 
             # --- Train Trial Model ---
@@ -488,11 +482,11 @@ class RLPipeline:
                 mean_reward = eval_callback.get_last_mean_reward()
                 self.rl_logger.info(f"Optuna Trial {trial.number} finished training. Last reported Mean Reward: {mean_reward:.4f}")
             except TrialPruned:
-                 self.rl_logger.info(f"Optuna Trial {trial.number} successfully pruned.")
-                 raise # Re-raise prune exception for Optuna to handle it
+                self.rl_logger.info(f"Optuna Trial {trial.number} successfully pruned.")
+                raise # Re-raise prune exception for Optuna to handle it
             except Exception as learn_err:
-                 self.rl_logger.error(f"Optuna Trial {trial.number} training failed during model.learn: {learn_err}", exc_info=True)
-                 mean_reward = -np.inf
+                self.rl_logger.error(f"Optuna Trial {trial.number} training failed during model.learn: {learn_err}", exc_info=True)
+                mean_reward = -np.inf
 
         except Exception as e:
             self.rl_logger.error(f"Optuna Trial {trial.number} failed unexpectedly: {e}", exc_info=True)
@@ -525,8 +519,8 @@ class RLPipeline:
             self.rl_logger.info("RL training disabled in config. Skipping RL pipeline.")
             return
         if not SB3_AVAILABLE or FantasyDraftEnv is None:
-             self.logger.error("RL Dependencies or Environment not available. Cannot run RL pipeline.")
-             return
+            self.logger.error("RL Dependencies or Environment not available. Cannot run RL pipeline.")
+            return
 
         self.rl_logger.info(f"--- Starting RL Pipeline Run for {target_year} ---")
         env = None
@@ -536,167 +530,12 @@ class RLPipeline:
         optuna_cfg = self.config.get('rl_training', {}).get('optuna', {})
         run_optuna = optuna_cfg.get('enabled', False)
 
-        # if run_optuna:
-        #     if not OPTUNA_AVAILABLE:
-        #         self.rl_logger.error("Optuna is enabled in config but not installed. Skipping HPO and using default hyperparameters.")
-        #     elif TrialEvalCallback is None:
-        #          self.rl_logger.error("Optuna is enabled but TrialEvalCallback is not available. Skipping HPO.")
-        #     else:
-        #         self.rl_logger.info("--- Starting Optuna Hyperparameter Optimization ---")
-        #         n_trials = optuna_cfg.get('n_trials', 25)
-        #         timeout_seconds = optuna_cfg.get('timeout_seconds', 26 * 3600)
-        #         study_name = f"ppo-fantasy-draft-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-        #         storage_url = optuna_cfg.get('storage_url', None)
-        #         pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=3, interval_steps=1)
-
-        #         study = optuna.create_study(study_name=study_name, storage=storage_url, direction="minimize", pruner=pruner, load_if_exists=True)
-        #         self.rl_logger.info(f"Optuna Study '{study_name}' created/loaded. Storage: {storage_url}. Pruner: MedianPruner.")
-        #         self.rl_logger.info(f"Running Optuna optimization for {n_trials} trials with timeout {timeout_seconds}s...")
-
-        #         try:
-        #             study.optimize(self._optuna_objective, n_trials=n_trials, timeout=timeout_seconds, gc_after_trial=True)
-        #             if study.best_trial:
-        #                 tuned_params = study.best_params
-        #                 if 'policy_kwargs_net_arch' in tuned_params:
-        #                      arch_choice = tuned_params.pop('policy_kwargs_net_arch')
-        #                      try:
-        #                          pi_str, vf_str = arch_choice.split('_')
-        #                          pi_layers = [int(x) for x in pi_str.split('=')[1].split(',')]
-        #                          vf_layers = [int(x) for x in vf_str.split('=')[1].split(',')]
-        #                          best_hyperparams['policy_kwargs'] = dict(net_arch=[dict(pi=pi_layers, vf=vf_layers)])
-        #                      except Exception as parse_err:
-        #                          self.rl_logger.error(f"Error parsing best net_arch '{arch_choice}' from Optuna: {parse_err}. Keeping default policy_kwargs.")
-        #                 best_hyperparams.update(tuned_params)
-        #                 self.rl_logger.info(f"Optuna finished. Best Trial: {study.best_trial.number}, Value (Negative Reward): {study.best_value:.4f}")
-        #                 self.rl_logger.info(f"Using Optuna Best Hyperparameters for final run: {best_hyperparams}")
-        #             else:
-        #                  self.rl_logger.warning("Optuna finished, but no best trial found. Proceeding with default hyperparameters.")
-        #         except Exception as opt_err:
-        #             self.rl_logger.error(f"Optuna optimization failed: {opt_err}", exc_info=True)
-        #             self.rl_logger.warning("Proceeding with default hyperparameters from config.")
-        # else:
-        #     self.rl_logger.info("Optuna hyperparameter optimization disabled.")
-
-
-        optuna_cfg = self.config.get('rl_training', {}).get('optuna', {})
-        run_optuna = optuna_cfg.get('enabled', False)
-
-        # if run_optuna:
-        #     if not OPTUNA_AVAILABLE:
-        #         self.rl_logger.error("Optuna is enabled but not installed. Skipping HPO.")
-        #     elif TrialEvalCallback is None:
-        #          self.rl_logger.error("Optuna is enabled but TrialEvalCallback is not available. Skipping HPO.")
-        #     else:
-        #         self.rl_logger.info("--- Starting Optuna Hyperparameter Optimization (Parallel) ---")
-        #         n_trials = optuna_cfg.get('n_trials', 50)
-        #         timeout_seconds = optuna_cfg.get('timeout_seconds', 26 * 3600)
-        #         study_name = f"ppo-fantasy-draft-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-
-        #         # --- Setup Persistent Storage (SQLite example) ---
-        #         storage_db_dir = os.path.join(self.config['paths']['output_dir'], 'optuna_db')
-        #         os.makedirs(storage_db_dir, exist_ok=True)
-        #         storage_path = f"sqlite:///{os.path.join(storage_db_dir, f'{study_name}.db')}"
-        #         self.rl_logger.info(f"Using Optuna storage: {storage_path}")
-        #         # ------------------------------------------------
-
-        #         pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=3, interval_steps=1)
-
-        #         study = optuna.create_study(
-        #             study_name=study_name,
-        #             storage=storage_path, # Use the database storage
-        #             direction="minimize",
-        #             pruner=pruner,
-        #             load_if_exists=True # Load previous results if study name/db exists
-        #         )
-
-        #         # --- Determine number of parallel jobs ---
-        #         n_jobs = 2 #optuna_cfg.get('n_jobs', -1) # Default to all cores if not specified
-        #         if n_jobs == -1:
-        #             # import multiprocessing
-        #             n_jobs = multiprocessing.cpu_count()
-        #             self.rl_logger.info(f"Using n_jobs=-1, detected {n_jobs} CPU cores.")
-        #         else:
-        #             self.rl_logger.info(f"Using n_jobs={n_jobs} based on config.")
-        #         # -----------------------------------------
-
-        #         self.rl_logger.info(f"Running Optuna optimization in PARALLEL with n_jobs={n_jobs} for {n_trials} trials (timeout {timeout_seconds}s)...")
-
-
-        #         # Create a shared counter for tracking trials
-        #         trial_counter = multiprocessing.Value('i', 0)
-
-        #         def run_trial_in_separate_process():
-        #             """Independent process function that creates and runs its own trial"""
-        #             # Get a unique trial ID
-        #             with trial_counter.get_lock():
-        #                 trial_id = trial_counter.value
-        #                 trial_counter.value += 1
-                    
-        #             pid = os.getpid()
-        #             print(f"Process {pid} starting trial {trial_id}")
-                    
-        #             # Create a new trial
-        #             trial = study.ask()
-                    
-        #             try:
-        #                 # This calls your existing objective function
-        #                 value = self._optuna_objective(trial)
-        #                 # Report result back to study
-        #                 study.tell(trial, value)
-        #                 return (trial_id, value, pid)
-        #             except Exception as e:
-        #                 print(f"Error in trial {trial_id} (PID {pid}): {e}")
-        #                 study.tell(trial, float("inf"))
-        #                 return (trial_id, float("inf"), pid)
-
-        #         try:
-        #             # Use ProcessPoolExecutor to explicitly create separate processes
-        #             completed_trials = []
-                    
-        #             with concurrent.futures.ProcessPoolExecutor(max_workers=n_jobs) as executor:
-        #                 # Submit all trial jobs
-        #                 futures = [executor.submit(run_trial_in_separate_process) for _ in range(n_trials)]
-                        
-        #                 # Process results as they complete
-        #                 for future in concurrent.futures.as_completed(futures):
-        #                     try:
-        #                         trial_id, value, pid = future.result()
-        #                         completed_trials.append((trial_id, value))
-        #                         self.rl_logger.info(f"Trial {trial_id} completed by process {pid} with value: {value}")
-        #                     except Exception as exc:
-        #                         self.rl_logger.error(f"Trial execution failed: {exc}")
-                    
-        #             self.rl_logger.info(f"All {len(completed_trials)} trials completed.")
-                    
-        #             # --- Save the study object itself ---
-        #             study_save_path = os.path.join(self.config['paths']['output_dir'], f'{study_name}_study.pkl')
-        #             try:
-        #                 joblib.dump(study, study_save_path)
-        #                 self.rl_logger.info(f"Saved Optuna study object to: {study_save_path}")
-        #             except Exception as study_save_err:
-        #                 self.rl_logger.error(f"Failed to save Optuna study object: {study_save_err}")
-
-        #             if study.best_trial:
-        #                 # ... (process best_hyperparams as before) ...
-        #                 self.rl_logger.info(f"Optuna (Parallel) finished. Best Trial: {study.best_trial.number}, Value: {study.best_value:.4f}")
-        #                 self.rl_logger.info(f"Using Optuna Best Hyperparameters: {best_hyperparams}")
-        #             else:
-        #                 self.rl_logger.warning("Optuna (Parallel) finished, but no best trial found. Using defaults.")
-
-        #         except Exception as opt_err:
-        #             self.rl_logger.error(f"Optuna parallel optimization failed: {opt_err}", exc_info=True)
-        #             self.rl_logger.warning("Proceeding with default hyperparameters.")
-        # else:
-        #     self.rl_logger.info("Optuna hyperparameter optimization disabled.")
-
-
         if run_optuna:
             self.rl_logger.info("--- Starting Optuna Hyperparameter Optimization (Parallel) ---")
             n_trials = optuna_cfg.get('n_trials', 50)
             timeout_seconds = optuna_cfg.get('timeout_seconds', 26 * 3600)
             study_name = f"ppo-fantasy-draft-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
-            # --- Setup Persistent Storage (SQLite example) ---
             storage_db_dir = os.path.join(self.config['paths']['output_dir'], 'optuna_db')
             os.makedirs(storage_db_dir, exist_ok=True)
             storage_path = f"sqlite:///{os.path.join(storage_db_dir, f'{study_name}.db')}"
@@ -846,25 +685,9 @@ class RLPipeline:
             # Final Env Setup w/ Monitor
             # self.rl_logger.debug("Defining make_final_env function...")
             self.rl_logger.debug(f"Defining make_env function for parallel envs (Index {{i}})...")
-            # def make_final_env():
-            #      run_timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-            #      monitor_log_dir = os.path.join(monitor_base_dir, 'rl_monitor_logs', f'final_run_{run_timestamp}')
-            #      os.makedirs(monitor_log_dir, exist_ok=True)
-            #      self.rl_logger.info(f"Monitor logs for final run will be saved to: {monitor_log_dir}")
-            #      self.rl_logger.debug("make_final_env: Creating FantasyDraftEnv instance...")
-            #      # Pass a copy of the projections DF to avoid potential issues if env modifies it
-            #      env_instance = FantasyDraftEnv(projections_df.copy(), league_settings, agent_draft_pos)
-            #      self.rl_logger.debug("make_final_env: FantasyDraftEnv created. Wrapping with Monitor...")
-            #      env_instance = Monitor(env_instance, filename=os.path.join(monitor_log_dir, "monitor.csv"), allow_early_resets=True)
-            #      self.rl_logger.debug("make_final_env: Monitor wrapping complete.")
-            #      return env_instance
             
             def make_env(rank: int, seed: int = 0):
-                """
-                Utility function for multiprocessed env.
-                :param rank: index of the subprocess
-                :param seed: the initial seed for RNG
-                """
+
                 def _init():
                     # Use a unique directory for each Monitor instance if needed,
                     # though often one aggregate monitor file is sufficient.
@@ -879,16 +702,15 @@ class RLPipeline:
                     env = FantasyDraftEnv(projections_df.copy(), league_settings, agent_draft_pos)
                     # Seed the environment if it supports it (optional but good practice)
                     try:
-                         env.reset(seed=env_seed)
+                        env.reset(seed=env_seed)
                     except TypeError:
-                         env.reset() # Fallback if seed not accepted by reset
+                            env.reset() # Fallback if seed not accepted by reset
 
                     # Wrap with Monitor
                     env = Monitor(env, filename=os.path.join(monitor_log_dir, f"monitor_{rank}.csv"), allow_early_resets=True)
                     self.rl_logger.debug(f"Created env instance {rank} with seed {env_seed}")
                     return env
-                # Set a unique seed for each environment process based on rank
-                # set_random_seed(seed + rank) # SB3 utility, or manage manually
+                # Set a unique seed for each  process based on rank
                 return _init
             
             self.rl_logger.info(f"Creating SubprocVecEnv with {num_envs} environments...")
@@ -898,38 +720,20 @@ class RLPipeline:
                 vec_env = DummyVecEnv([make_env(0)]) # Use DummyVecEnv for a single environment case
             self.rl_logger.info(f"{'SubprocVecEnv' if num_envs > 1 else 'DummyVecEnv'} created.")
 
-            # self.rl_logger.debug("Creating DummyVecEnv for final training...")
-            # env = DummyVecEnv([make_final_env])
-            # self.rl_logger.debug("DummyVecEnv created.")
-            # try:
-            #     self.rl_logger.debug("Running check_env on underlying environment...")
-            #     check_env(env.envs[0].env, warn=True);
-            #     self.rl_logger.info("Final Env check passed.")
-            # except Exception as check_err:
-            #      self.rl_logger.error(f"Final Env check failed: {check_err}", exc_info=True)
-            #      if env: env.close() # Close if check fails
-            #      return
-
             # Model Definition
             self.rl_logger.info(f"Defining FINAL PPO model with params: {best_hyperparams}")
             if 'policy_kwargs' in best_hyperparams and not isinstance(best_hyperparams.get('policy_kwargs'), (dict, type(None))):
-                 self.rl_logger.warning(f"Invalid type for policy_kwargs in best_hyperparams. Setting to None.")
-                 best_hyperparams['policy_kwargs'] = None
+                self.rl_logger.warning(f"Invalid type for policy_kwargs in best_hyperparams. Setting to None.")
+                best_hyperparams['policy_kwargs'] = None
             elif 'policy_kwargs' not in best_hyperparams:
-                 best_hyperparams['policy_kwargs'] = self.config.get('rl_training', {}).get('ppo_hyperparams', {}).get('policy_kwargs', None)
-                 if not isinstance(best_hyperparams['policy_kwargs'], (dict, type(None))):
-                      best_hyperparams['policy_kwargs'] = None
-                      self.rl_logger.warning("Using default SB3 policy_kwargs as config value was invalid.")
+                best_hyperparams['policy_kwargs'] = self.config.get('rl_training', {}).get('ppo_hyperparams', {}).get('policy_kwargs', None)
+                if not isinstance(best_hyperparams['policy_kwargs'], (dict, type(None))):
+                    best_hyperparams['policy_kwargs'] = None
+                    self.rl_logger.warning("Using default SB3 policy_kwargs as config value was invalid.")
 
-            # --- Debugging Point ---
             self.rl_logger.debug(">>> BEFORE FINAL PPO Initialization <<<")
             time.sleep(0.5) # Tiny pause before potential hang point
-            # ---
 
-            # Define the PPO model instance
-            # --- TEMPORARY TEST: Disable TensorBoard Logging ---
-            # final_tensorboard_log = None
-            # self.rl_logger.warning("TEMPORARY DEBUG: TensorBoard logging disabled for PPO init.")
             final_tensorboard_log = tensorboard_log_path # Restore normal path
             # ---
             final_model = PPO(
@@ -940,10 +744,7 @@ class RLPipeline:
                 **best_hyperparams
             )
             self.rl_logger.info("Final PPO model defined.")
-            # final_model = PPO(policy="MlpPolicy", env=env, verbose=1, # Changed verbose to 1 for final run
-            #             tensorboard_log=final_tensorboard_log, **best_hyperparams)
 
-            # --- Debugging Point ---
             self.rl_logger.debug(">>> AFTER FINAL PPO Initialization <<<")
             # ---
 
@@ -951,13 +752,6 @@ class RLPipeline:
             self.rl_logger.debug(">>> BEFORE FINAL CallbackList Initialization <<<")
             callbacks_final = []
             checkpoint_freq = max(20000, total_timesteps // 50)
-            # cp_callback = CheckpointCallback(save_freq=checkpoint_freq, save_path=checkpoint_save_path, name_prefix="final_"+model_filename_base.replace('.zip',''), save_replay_buffer=False, save_vecnormalize=True)
-            # callbacks_final.append(cp_callback)
-            # self.rl_logger.debug(f"CheckpointCallback enabled for final run (freq: {checkpoint_freq} steps).")
-            # # --- TEMPORARY TEST: Disable Callbacks ---
-            # # final_callback_list = None
-            # # self.rl_logger.warning("TEMPORARY DEBUG: Callbacks disabled for model.learn.")
-            # final_callback_list = CallbackList(callbacks_final) # Restore normal callbacks
             
             cp_callback = CheckpointCallback(
                 save_freq=checkpoint_freq,
@@ -969,16 +763,8 @@ class RLPipeline:
             callbacks_final.append(cp_callback)
             final_callback_list = CallbackList(callbacks_final)
             self.rl_logger.info("Callbacks defined for final run.")
-            # ---
             self.rl_logger.debug(">>> AFTER FINAL CallbackList Initialization <<<")
 
-
-            # # Final Training
-            # self.rl_logger.info(f"Starting FINAL training for {total_timesteps} timesteps...")
-            # tb_log_name = f"PPO_Final"
-            # final_model.learn( total_timesteps=total_timesteps, progress_bar=True, callback=final_callback_list, tb_log_name=tb_log_name, reset_num_timesteps=False )
-            # self.rl_logger.info("FINAL RL Training finished.")
-            
             # --- Final Training ---
             self.rl_logger.info(f"Starting FINAL training with {num_envs} parallel envs for {total_timesteps} total timesteps...")
             tb_log_name = f"PPO_Final_{num_envs}envs" # Include env count in log name
@@ -994,19 +780,16 @@ class RLPipeline:
 
             # Save Final Model
             if model_save_path:
-                 try:
-                     final_model.save(model_save_path);
-                     self.rl_logger.info(f"FINAL RL Model saved to {model_save_path}")
-                     hyperparams_save_path = model_save_path.replace('.zip', '_hyperparams.json')
-                     with open(hyperparams_save_path, 'w') as f:
-                         serializable_params = best_hyperparams.copy()
-                         # Basic check for non-serializable items if needed
-                         # if serializable_params.get('policy_kwargs') and not isinstance(serializable_params['policy_kwargs'], (dict, type(None))):
-                         #      serializable_params['policy_kwargs'] = str(serializable_params['policy_kwargs']) # Example fallback
-                         json.dump(serializable_params, f, indent=4)
-                     self.rl_logger.info(f"FINAL RL Hyperparameters saved to {hyperparams_save_path}")
-                 except Exception as save_err:
-                     self.rl_logger.error(f"Error saving FINAL RL model or hyperparameters: {save_err}", exc_info=True)
+                try:
+                    final_model.save(model_save_path);
+                    self.rl_logger.info(f"FINAL RL Model saved to {model_save_path}")
+                    hyperparams_save_path = model_save_path.replace('.zip', '_hyperparams.json')
+                    with open(hyperparams_save_path, 'w') as f:
+                        serializable_params = best_hyperparams.copy()
+                        json.dump(serializable_params, f, indent=4)
+                    self.rl_logger.info(f"FINAL RL Hyperparameters saved to {hyperparams_save_path}")
+                except Exception as save_err:
+                    self.rl_logger.error(f"Error saving FINAL RL model or hyperparameters: {save_err}", exc_info=True)
 
             # Final Evaluation
             self.evaluate_agent(final_model, projections_df, league_settings, agent_draft_pos, target_year)
@@ -1016,21 +799,13 @@ class RLPipeline:
             
 
         except ImportError as imp_err:
-             self.logger.error(f"Import Error during RL final run setup: {imp_err}. Aborting.")
-        # except Exception as e:
-        #      self.rl_logger.error(f"Unexpected error in RL pipeline final run: {e}", exc_info=True)
-        # finally:
-        #      if env is not None:
-        #           try:
-        #               env.close();
-        #               self.rl_logger.info("Final training environment closed.")
-        #           except Exception as close_err:
-        #               self.rl_logger.error(f"Error closing final training env: {close_err}")
+            self.logger.error(f"Import Error during RL final run setup: {imp_err}. Aborting.")
+
         
         except Exception as e:
             self.rl_logger.error(f"Unexpected error in RL pipeline final run: {e}", exc_info=True)
         finally:
-            if vec_env is not None: # Close the VecEnv
+            if vec_env is not None: 
                 try:
                     vec_env.close()
                     self.rl_logger.info("Final training vectorized environment closed.")
@@ -1039,7 +814,7 @@ class RLPipeline:
 
 
     def evaluate_agent(self, model, projections_df, league_settings, agent_draft_pos, eval_year):
-        """Evaluates the RL agent for a specific year."""
+        """Evaluates the RL agent."""
         self.rl_logger.info(f"--- Evaluating Agent for Year: {eval_year} ---")
         eval_env = None
         try:
@@ -1051,70 +826,70 @@ class RLPipeline:
             self.rl_logger.info(f"Running {n_eval_episodes} evaluation episodes...")
 
             for i_episode in range(n_eval_episodes):
-                 obs, info = eval_env.reset(seed=int(time.time() * 1000 + i_episode) % (2**32 - 1))
-                 done, truncated, ep_reward, step_count = False, False, 0.0, 0
-                 max_ep_steps = getattr(eval_env, 'total_picks', 200) + 10
+                obs, info = eval_env.reset(seed=int(time.time() * 1000 + i_episode) % (2**32 - 1))
+                done, truncated, ep_reward, step_count = False, False, 0.0, 0
+                max_ep_steps = getattr(eval_env, 'total_picks', 200) + 10
 
-                 self.rl_logger.debug(f"\n--- Eval Episode {i_episode+1}/{n_eval_episodes} ---")
+                self.rl_logger.debug(f"\n--- Eval Episode {i_episode+1}/{n_eval_episodes} ---")
 
-                 while not done and not truncated and step_count < max_ep_steps:
-                      action_output, _states = model.predict(obs, deterministic=True)
-                      action_int = -1
-                      try:
-                           if isinstance(action_output, np.ndarray): action_int = int(action_output.item()) if action_output.size==1 else -1
-                           elif isinstance(action_output, (int, np.integer, np.int64, np.int32)): action_int = int(action_output)
-                           else: self.rl_logger.error(f"Eval Ep {i_episode+1} Predict unexpected type: {type(action_output)}")
-                      except Exception as e: self.rl_logger.error(f"Eval Ep {i_episode+1} Error processing action '{action_output}': {e}"); action_int = -1
+                while not done and not truncated and step_count < max_ep_steps:
+                    action_output, _states = model.predict(obs, deterministic=True)
+                    action_int = -1
+                    try:
+                        if isinstance(action_output, np.ndarray): action_int = int(action_output.item()) if action_output.size==1 else -1
+                        elif isinstance(action_output, (int, np.integer, np.int64, np.int32)): action_int = int(action_output)
+                        else: self.rl_logger.error(f"Eval Ep {i_episode+1} Predict unexpected type: {type(action_output)}")
+                    except Exception as e: self.rl_logger.error(f"Eval Ep {i_episode+1} Error processing action '{action_output}': {e}"); action_int = -1
 
-                      if action_int < 0 or action_int >= NUM_ACTIONS:
-                           self.rl_logger.warning(f"Eval Ep {i_episode+1} Invalid action {action_int}. Using fallback {ACTION_BEST_AVAILABLE}.")
-                           action_int = ACTION_BEST_AVAILABLE
+                    if action_int < 0 or action_int >= NUM_ACTIONS:
+                        self.rl_logger.warning(f"Eval Ep {i_episode+1} Invalid action {action_int}. Using fallback {ACTION_BEST_AVAILABLE}.")
+                        action_int = ACTION_BEST_AVAILABLE
 
-                      try:
-                           obs, reward, done, truncated, info = eval_env.step(action_int)
-                      except Exception as step_err:
-                           self.rl_logger.error(f"Eval Ep {i_episode+1} Error in env.step(action={action_int}) at step {step_count+1}: {step_err}", exc_info=True)
-                           done = True
+                    try:
+                        obs, reward, done, truncated, info = eval_env.step(action_int)
+                    except Exception as step_err:
+                        self.rl_logger.error(f"Eval Ep {i_episode+1} Error in env.step(action={action_int}) at step {step_count+1}: {step_err}", exc_info=True)
+                        done = True
 
-                      step_count += 1
-                      if done or truncated:
-                           ep_reward = reward;
-                           status = "Done" if done else "Truncated";
-                           self.rl_logger.debug(f"Eval Ep {i_episode+1} Finished ({status} after {step_count} steps). Final Reward: {ep_reward:.4f}")
-                           self.rl_logger.info(f"Agent's Final Roster (Eval Ep {i_episode+1}):"); roster_list = eval_env.teams_rosters.get(eval_env.agent_team_id, [])
-                           if roster_list:
-                                try:
-                                   df_roster = pd.DataFrame(roster_list); cols = ['name', 'position', 'projected_points', 'vorp', 'risk_adjusted_vorp']; avail_cols = [c for c in cols if c in df_roster.columns];
-                                   if avail_cols: self.rl_logger.debug(f"\n{df_roster[avail_cols].round(2).to_string(index=False)}")
-                                   else: self.rl_logger.warning("  Roster missing display cols.")
-                                except Exception as df_err: self.rl_logger.error(f"Error logging roster DF for Ep {i_episode+1}: {df_err}"); self.rl_logger.info("  Could not log roster.")
-                           else: self.rl_logger.warning("  Agent roster is empty.")
-                           episode_rewards.append(ep_reward)
-                           break
-                 if step_count >= max_ep_steps:
-                      self.rl_logger.warning(f"Eval Ep {i_episode+1} hit max steps ({max_ep_steps}) without finishing naturally.")
+                    step_count += 1
+                    if done or truncated:
+                        ep_reward = reward;
+                        status = "Done" if done else "Truncated";
+                        self.rl_logger.debug(f"Eval Ep {i_episode+1} Finished ({status} after {step_count} steps). Final Reward: {ep_reward:.4f}")
+                        self.rl_logger.info(f"Agent's Final Roster (Eval Ep {i_episode+1}):"); roster_list = eval_env.teams_rosters.get(eval_env.agent_team_id, [])
+                        if roster_list:
+                            try:
+                                df_roster = pd.DataFrame(roster_list); cols = ['name', 'position', 'projected_points', 'vorp', 'risk_adjusted_vorp']; avail_cols = [c for c in cols if c in df_roster.columns];
+                                if avail_cols: self.rl_logger.debug(f"\n{df_roster[avail_cols].round(2).to_string(index=False)}")
+                                else: self.rl_logger.warning("  Roster missing display cols.")
+                            except Exception as df_err: self.rl_logger.error(f"Error logging roster DF for Ep {i_episode+1}: {df_err}"); self.rl_logger.info("  Could not log roster.")
+                        else: self.rl_logger.warning("  Agent roster is empty.")
+                        episode_rewards.append(ep_reward)
+                        break
+                if step_count >= max_ep_steps:
+                    self.rl_logger.warning(f"Eval Ep {i_episode+1} hit max steps ({max_ep_steps}) without finishing naturally.")
 
 
             if episode_rewards:
-                 mean_reward = np.mean(episode_rewards)
-                 std_reward = np.std(episode_rewards)
-                 self.rl_logger.info(f"\nEvaluation Summary ({eval_year}, {len(episode_rewards)} episodes finished):") # Corrected count
-                 self.rl_logger.info(f"  Mean Reward (Total VORP): {mean_reward:.4f}")
-                 self.rl_logger.info(f"  Std Dev Reward: {std_reward:.4f}")
-                 self.rl_logger.info(f"  Individual Rewards: {[f'{r:.2f}' for r in episode_rewards]}")
+                mean_reward = np.mean(episode_rewards)
+                std_reward = np.std(episode_rewards)
+                self.rl_logger.info(f"\nEvaluation Summary ({eval_year}, {len(episode_rewards)} episodes finished):") # Corrected count
+                self.rl_logger.info(f"  Mean Reward (Total VORP): {mean_reward:.4f}")
+                self.rl_logger.info(f"  Std Dev Reward: {std_reward:.4f}")
+                self.rl_logger.info(f"  Individual Rewards: {[f'{r:.2f}' for r in episode_rewards]}")
             else:
-                 self.rl_logger.warning(f"No episodes finished successfully during evaluation for {eval_year}.")
+                self.rl_logger.warning(f"No episodes finished successfully during evaluation for {eval_year}.")
 
             self.rl_logger.info(f"--- RL Draft Agent Evaluation Finished for Year: {eval_year} ---")
 
         except ImportError as imp_err:
             self.logger.error(f"Import Error during evaluation setup for {eval_year}: {imp_err}. Aborting evaluation.")
         except Exception as e:
-             self.rl_logger.error(f"Error during evaluation for {eval_year}: {e}", exc_info=True)
+            self.rl_logger.error(f"Error during evaluation for {eval_year}: {e}", exc_info=True)
         finally:
-             if eval_env is not None:
-                  try: eval_env.close(); self.rl_logger.info(f"Evaluation environment for {eval_year} closed.")
-                  except Exception as ce: self.rl_logger.error(f"Error closing evaluation env for {eval_year}: {ce}")
+            if eval_env is not None:
+                try: eval_env.close(); self.rl_logger.info(f"Evaluation environment for {eval_year} closed.")
+                except Exception as ce: self.rl_logger.error(f"Error closing evaluation env for {eval_year}: {ce}")
 
 
 

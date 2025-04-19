@@ -1,7 +1,3 @@
-"""
-Data loading utilities for fantasy football analysis
-"""
-
 import pandas as pd
 import nfl_data_py as nfl
 from espn_api.football import League
@@ -605,8 +601,8 @@ def standardize_columns(df):
     
     # Ensure numeric cols are numeric (sometimes strings slip in)
     numeric_cols = ['carries', 'attempts', 'receptions', 'rushing_yards', 'receiving_yards', 
-                   'passing_yards', 'rushing_tds', 'receiving_tds', 'passing_tds', 'interceptions',
-                   'fumbles_lost', 'games']
+                    'passing_yards', 'rushing_tds', 'receiving_tds', 'passing_tds', 'interceptions',
+                    'fumbles_lost', 'games']
     
     for col in numeric_cols:
         if col in df.columns:
@@ -643,8 +639,8 @@ def add_derived_features(seasonal_data):
     # Per game stats
     if 'games' in df.columns:
         for col in ['passing_yards', 'rushing_yards', 'receiving_yards', 
-                   'passing_tds', 'rushing_tds', 'receiving_tds',
-                   'targets', 'receptions', 'interceptions', 'carries', 'attempts']:
+                    'passing_tds', 'rushing_tds', 'receiving_tds',
+                    'targets', 'receptions', 'interceptions', 'carries', 'attempts']:
             if col in df.columns:
                 derived_features[f'{col}_per_game'] = df[col] / df['games'].clip(lower=1)
     
@@ -901,7 +897,7 @@ def add_derived_features(seasonal_data):
                 # Create career trajectory indicators
                 derived_features['early_career'] = (derived_features['seasons_in_league'] <= 2).astype(int)
                 derived_features['prime_career'] = ((derived_features['seasons_in_league'] > 2) & 
-                                                 (derived_features['seasons_in_league'] <= 6)).astype(int)
+                                                    (derived_features['seasons_in_league'] <= 6)).astype(int)
                 derived_features['late_career'] = (derived_features['seasons_in_league'] > 6).astype(int)
         
         # Add all trend features to derived features

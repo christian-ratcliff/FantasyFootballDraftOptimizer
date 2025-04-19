@@ -23,7 +23,6 @@ except ImportError:
 
 from .draft_manager import DraftManager
 
-# --- Custom Table Item for Numeric Sorting ---
 class NumericTableWidgetItem(QTableWidgetItem):
     """Custom QTableWidgetItem that allows for proper numeric sorting."""
     def __init__(self, text, numeric_value):
@@ -46,7 +45,7 @@ class DraftApp(QMainWindow):
     def __init__(self, config):
         super().__init__()
         if not PYQT_AVAILABLE:
-             raise ImportError("PyQt6 library is required but not installed.")
+            raise ImportError("PyQt6 library is required but not installed.")
 
         self.config = config
         self.logger = logging.getLogger("fantasy_football")
@@ -256,7 +255,7 @@ class DraftApp(QMainWindow):
                 self.pick_entry.setText(name_item.text())
                 self._handle_submit_pick()
         else:
-             self.logger.warning("Recommendation table has no columns to get name from.")
+            self.logger.warning("Recommendation table has no columns to get name from.")
 
     @pyqtSlot(QTableWidgetItem)
     def _available_double_clicked(self, item):
@@ -442,9 +441,9 @@ class DraftApp(QMainWindow):
             row_fmts.append("{:<" + str(width) + "}")
             header_titles.append(col.replace('_',' ').title())
             if formatted_df[col].dtype == 'float64' or formatted_df[col].dtype == 'float32':
-                 formatted_df[col] = formatted_df[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
+                formatted_df[col] = formatted_df[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
             else:
-                 formatted_df[col] = formatted_df[col].astype(str)
+                formatted_df[col] = formatted_df[col].astype(str)
 
         header_fmt_string = " ".join(row_fmts)
         row_fmt_string = " ".join(row_fmts)
@@ -483,9 +482,9 @@ class DraftApp(QMainWindow):
             row_fmts.append("{:<" + str(width) + "}")
             header_titles.append(col.replace('_',' ').title())
             if formatted_df[col].dtype == 'float64' or formatted_df[col].dtype == 'float32':
-                 formatted_df[col] = formatted_df[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
+                formatted_df[col] = formatted_df[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
             else:
-                 formatted_df[col] = formatted_df[col].astype(str)
+                formatted_df[col] = formatted_df[col].astype(str)
 
         header_fmt_string = " ".join(row_fmts)
         row_fmt_string = " ".join(row_fmts)
@@ -523,8 +522,8 @@ class DraftApp(QMainWindow):
             return
 
         if player_dict.get('player_id') in self.manager.drafted_player_ids:
-             self.show_error("Player Already Drafted", f"'{player_dict['name']}' has already been drafted.")
-             return
+            self.show_error("Player Already Drafted", f"'{player_dict['name']}' has already been drafted.")
+            return
 
         pick_num_before_action = self.manager.current_pick_overall
 
@@ -559,17 +558,17 @@ class DraftApp(QMainWindow):
 
         # Determine which table has the selection
         if self.available_players_table.hasFocus() or len(self.available_players_table.selectedItems()) > 0:
-             selected_items = self.available_players_table.selectedItems()
-             if selected_items:
-                 source_table = self.available_players_table
-                 name_item = source_table.item(selected_items[0].row(), 0) # Name in col 0
-                 if name_item: player_name = name_item.text()
+            selected_items = self.available_players_table.selectedItems()
+            if selected_items:
+                source_table = self.available_players_table
+                name_item = source_table.item(selected_items[0].row(), 0) # Name in col 0
+                if name_item: player_name = name_item.text()
         elif self.recommendations_table.hasFocus() or len(self.recommendations_table.selectedItems()) > 0:
-             selected_items = self.recommendations_table.selectedItems()
-             if selected_items:
-                 source_table = self.recommendations_table
-                 name_item = source_table.item(selected_items[0].row(), 0) # Name in col 0
-                 if name_item: player_name = name_item.text()
+            selected_items = self.recommendations_table.selectedItems()
+            if selected_items:
+                source_table = self.recommendations_table
+                name_item = source_table.item(selected_items[0].row(), 0) # Name in col 0
+                if name_item: player_name = name_item.text()
 
         if player_name:
             player_details_row = self.manager.projections_master[
@@ -578,11 +577,11 @@ class DraftApp(QMainWindow):
             if not player_details_row.empty:
                 details = player_details_row.iloc[0].to_dict()
                 detail_str = f"Name: {details.get('name', 'N/A')}\n" \
-                             f"Pos: {details.get('position', 'N/A')} | Age: {details.get('age', 'N/A')}\n" \
-                             f"Proj Pts: {details.get('projected_points', 0.0):.2f}\n" \
-                             f"VORP: {details.get('vorp', 0.0):.2f} | RiskAdj: {details.get('risk_adjusted_vorp', 0.0):.2f}\n" \
-                             f"Range: {details.get('projection_low', 0.0):.2f} - {details.get('projection_high', 0.0):.2f}\n" \
-                             f"Ceiling: {details.get('ceiling_projection', 0.0):.2f}"
+                            f"Pos: {details.get('position', 'N/A')} | Age: {details.get('age', 'N/A')}\n" \
+                            f"Proj Pts: {details.get('projected_points', 0.0):.2f}\n" \
+                            f"VORP: {details.get('vorp', 0.0):.2f} | RiskAdj: {details.get('risk_adjusted_vorp', 0.0):.2f}\n" \
+                            f"Range: {details.get('projection_low', 0.0):.2f} - {details.get('projection_high', 0.0):.2f}\n" \
+                            f"Ceiling: {details.get('ceiling_projection', 0.0):.2f}"
                 self.player_details_text.setText(detail_str)
                 return
 
@@ -593,9 +592,9 @@ class DraftApp(QMainWindow):
         """Displays the roster for the selected opponent."""
         selected_team_id = self.opponent_select_combo.currentData()
         if selected_team_id is None or selected_team_id == -1:
-             self.opponent_roster_text.clear()
-             self.opponent_roster_text.append("Select an opponent team above.")
-             return
+            self.opponent_roster_text.clear()
+            self.opponent_roster_text.append("Select an opponent team above.")
+            return
 
         roster = self.manager.get_team_roster(selected_team_id)
         self._display_roster_text(self.opponent_roster_text, pd.DataFrame(roster), ['name', 'position', 'vorp'])
@@ -629,7 +628,7 @@ class DraftApp(QMainWindow):
         title = f"--- Team {next_team_id} Watchlist (Predicted) ---"
         # Display using the text helper
         self._display_players_text(self.opponent_watchlist_text, pd.DataFrame(watchlist),
-                                   ['name', 'position', 'adjusted_score', 'combined_score'], title=title)
+                                    ['name', 'position', 'adjusted_score', 'combined_score'], title=title)
 
 
     @pyqtSlot()
@@ -665,17 +664,17 @@ class DraftApp(QMainWindow):
                     self.draft_log = []
                     pick_num = 0
                     while pick_num < self.manager.current_pick_overall:
-                         team_id = self.manager.draft_order[pick_num]
-                         # Find the player picked at this pick number for this team
-                         # This assumes rosters store players in draft order for that team
-                         roster = self.manager.teams_rosters.get(team_id, [])
-                         team_pick_index = sum(1 for i in range(pick_num + 1) if self.manager.draft_order[i] == team_id) - 1
-                         if team_pick_index < len(roster):
-                              player = roster[team_pick_index]
-                              self._add_to_draft_log(pick_num, team_id, player.get('name','?'), player.get('position','?'))
-                         else:
-                              self.logger.warning(f"Could not reconstruct log for pick {pick_num+1}, team {team_id}")
-                         pick_num += 1
+                        team_id = self.manager.draft_order[pick_num]
+                        # Find the player picked at this pick number for this team
+                        # This assumes rosters store players in draft order for that team
+                        roster = self.manager.teams_rosters.get(team_id, [])
+                        team_pick_index = sum(1 for i in range(pick_num + 1) if self.manager.draft_order[i] == team_id) - 1
+                        if team_pick_index < len(roster):
+                            player = roster[team_pick_index]
+                            self._add_to_draft_log(pick_num, team_id, player.get('name','?'), player.get('position','?'))
+                        else:
+                            self.logger.warning(f"Could not reconstruct log for pick {pick_num+1}, team {team_id}")
+                        pick_num += 1
 
                     self._update_draft_log_display()
                     self._update_display()
@@ -708,16 +707,16 @@ class DraftApp(QMainWindow):
         if teams: # Check if teams list is not empty
             sorted_teams = sorted(teams, key=lambda t: t.get('team_id', 0))
             for i, team_info in enumerate(sorted_teams):
-                 team_id = team_info.get('team_id')
-                 team_name = team_info.get('team_name', f"Team {team_id}")
-                 if team_id and team_id != self.manager.agent_team_id: # Exclude agent
-                     self.opponent_select_combo.addItem(f"{team_name} (ID: {team_id})", team_id)
-                     # Check if this was the previously selected item
-                     if team_id == current_selection_data:
-                         current_index = self.opponent_select_combo.count() - 1 # Get index of the added item
-                         found_current = True
+                team_id = team_info.get('team_id')
+                team_name = team_info.get('team_name', f"Team {team_id}")
+                if team_id and team_id != self.manager.agent_team_id: # Exclude agent
+                    self.opponent_select_combo.addItem(f"{team_name} (ID: {team_id})", team_id)
+                    # Check if this was the previously selected item
+                    if team_id == current_selection_data:
+                        current_index = self.opponent_select_combo.count() - 1 # Get index of the added item
+                        found_current = True
         else:
-             self.logger.warning("No teams found in league settings to populate opponent selector.")
+            self.logger.warning("No teams found in league settings to populate opponent selector.")
 
         self.opponent_select_combo.blockSignals(False) # Re-enable signals
 
@@ -731,7 +730,6 @@ class DraftApp(QMainWindow):
                 self._display_opponent_roster() # Trigger display update which should clear the roster text
 
 
-# --- Main Execution Function ---
 def run_gui(config):
     """Initializes and runs the PyQt application."""
     if not PYQT_AVAILABLE:
@@ -754,9 +752,9 @@ def run_gui(config):
 if __name__ == '__main__':
     print("Starting Draft GUI (PyQt) directly...")
     test_config = {
-        'paths': { 'models_dir': 'data_testing/models', 'config_path': 'configs/league_settings.json', 'output_dir': 'data_testing/outputs' },
+        'paths': { 'models_dir': 'data/models', 'config_path': 'configs/league_settings.json', 'output_dir': 'data/outputs' },
         'rl_training': { 'model_save_path': 'ppo_fantasy_draft_agent', 'agent_draft_position': 5 },
-         'logging': { 'level': "INFO", 'file': "draft_gui_pyqt_run.log" }
+        'logging': { 'level': "INFO", 'file': "draft_gui_pyqt_run.log" }
     }
     logging.basicConfig( level=test_config['logging'].get('level', 'INFO').upper(), format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', handlers=[ logging.StreamHandler(sys.stdout), logging.FileHandler(test_config['logging'].get('file', 'gui_direct.log'), mode='a') ] )
     logger_main = logging.getLogger("fantasy_football")

@@ -45,7 +45,7 @@ class MLExplorer:
         self.feature_sets = feature_sets
         self.output_dir = output_dir
         
-        # Define position colors for consistency
+        # Define position colors
         self.position_colors = {
             'QB': '#1f77b4',  # blue
             'RB': '#ff7f0e',  # orange
@@ -92,7 +92,7 @@ class MLExplorer:
             # Get the absolute correlation values
             corr_abs = corr_data.abs()
             
-            # Get the upper triangle (excluding the diagonal)
+            # Get the upper triangle
             upper = corr_abs.where(np.triu(np.ones(corr_abs.shape), k=1).astype(bool))
             
             # Find top 10 correlations and their pairs
@@ -181,7 +181,7 @@ class MLExplorer:
                     square=True, linewidths=.5, annot=True, fmt=".2f", annot_kws={"size": 7})
             
             # Add title
-            plt.title(f'Full Feature Correlation Matrix for {position.upper()}', fontsize=16, pad=20)
+            plt.title(f'ITS TOO TIGHT: Full Feature Correlation Matrix for {position.upper()}', fontsize=16, pad=20)
             
             # Adjust labels for better readability
             plt.tight_layout()
@@ -308,134 +308,12 @@ class MLExplorer:
             except Exception as e:
                 logger.error(f"Error creating feature importance plot for {position}: {e}")
     
-    def create_pair_plots(self):
-        """
-        Create pairwise relationship plots for key features
-        """
-        logger.info("Creating pair plots for key features")
-        
-        for position in ['qb', 'rb', 'wr', 'te']:
-            # Check if we have data for this position
-            train_key = f"{position}_train"
-            if train_key not in self.feature_sets or self.feature_sets[train_key].empty:
-                logger.warning(f"No {position} training data available")
-                continue
-            
-            # Get training data
-            train_data = self.feature_sets[train_key].copy()
-            
-            # Select a subset of important features for pairplot (too many would be unreadable)
-            key_features = self._select_key_features(train_data, position)
-            
-            if len(key_features) < 2:
-                logger.warning(f"Not enough key features for {position} pair plot")
-                continue
-            
-            # Create output directory
-            dist_dir = os.path.join(self.output_dir, position, 'distributions')
-            os.makedirs(dist_dir, exist_ok=True)
-            
-            try:
-                # Add fantasy points for coloring
-                if 'fantasy_points_per_game' in train_data.columns:
-                    key_features.append('fantasy_points_per_game')
-                
-                # Create pairplot
-                plt.figure(figsize=(16, 14))
-                
-                # Create subset for pair plot
-                pair_data = train_data[key_features].copy()
-                
-                # Create pair plot with Seaborn
-                g = sns.pairplot(pair_data, height=2.5, diag_kind="kde", 
-                              plot_kws={'alpha': 0.6, 's': 80, 'edgecolor': 'k'},
-                              diag_kws={'fill': True})
-                
-                # Set title
-                g.fig.suptitle(f'Feature Relationships for {position.upper()}', fontsize=16, y=1.02)
-                
-                # Save figure
-                file_path = os.path.join(dist_dir, f'pair_plot.png')
-                plt.savefig(file_path, dpi=300, bbox_inches="tight")
-                plt.close()
-                
-                logger.info(f"Created pair plot for {position}")
-                
-                # Create correlation scatter plots for fantasy points
-                if 'fantasy_points_per_game' in train_data.columns:
-                    target = 'fantasy_points_per_game'
-                    features = [f for f in key_features if f != target]
-                    
-                    # Calculate correlations
-                    correlations = []
-                    for feature in features:
-                        try:
-                            # Pearson (linear) correlation
-                            pearson, _ = pearsonr(train_data[feature], train_data[target])
-                            # Spearman (rank) correlation
-                            spearman, _ = spearmanr(train_data[feature], train_data[target])
-                            correlations.append((feature, pearson, spearman))
-                        except:
-                            pass
-                    
-                    # Sort by absolute Pearson correlation
-                    correlations.sort(key=lambda x: abs(x[1]), reverse=True)
-                    
-                    # Create scatter plots for top correlations
-                    n_plots = min(6, len(correlations))
-                    if n_plots > 0:
-                        fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-                        axes = axes.flatten()
-                        
-                        for i in range(n_plots):
-                            feature, pearson, spearman = correlations[i]
-                            ax = axes[i]
-                            
-                            # Create scatter plot
-                            ax.scatter(train_data[feature], train_data[target], 
-                                    alpha=0.6, s=50, edgecolor='k',
-                                    color=self.position_colors.get(position.upper(), '#1f77b4'))
-                            
-                            # Add regression line
-                            sns.regplot(x=feature, y=target, data=train_data, 
-                                     scatter=False, ax=ax, color='red')
-                            
-                            # Add correlation info
-                            ax.text(0.05, 0.95, f"Pearson: {pearson:.3f}\nSpearman: {spearman:.3f}", 
-                                  transform=ax.transAxes, fontsize=12,
-                                  verticalalignment='top', bbox=dict(boxstyle='round', alpha=0.5))
-                            
-                            # Set labels
-                            ax.set_xlabel(feature)
-                            ax.set_ylabel(target)
-                            
-                            # Set title
-                            ax.set_title(f"{feature} vs {target}")
-                        
-                        # Turn off any unused subplots
-                        for i in range(n_plots, len(axes)):
-                            axes[i].axis('off')
-                        
-                        # Adjust layout
-                        plt.tight_layout()
-                        
-                        # Save figure
-                        file_path = os.path.join(dist_dir, f'correlation_scatters.png')
-                        plt.savefig(file_path, dpi=300, bbox_inches="tight")
-                        plt.close()
-                        
-                        logger.info(f"Created correlation scatter plots for {position}")
-            
-            except Exception as e:
-                logger.error(f"Error creating pair plot for {position}: {e}")
-    
     def create_cluster_visualizations(self):
         """
         Create enhanced cluster visualizations
         """
         logger.info("Creating enhanced cluster visualizations")
         
-        # Define a more distinct color palette
         distinct_colors = {
             'Elite': '#e41a1c',        # Bright red
             'High Tier': '#377eb8',    # Blue
@@ -709,7 +587,7 @@ class MLExplorer:
                     ha='center', fontsize=12)
             
             # Adjust layout
-            plt.tight_layout(rect=[0, 0.05, 1, 1])  # Make room for the explanation text
+            plt.tight_layout(rect=[0, 0.05, 1, 1])
             
             # Save figure
             file_path = os.path.join(output_dir, f'feature_clusters.png')
@@ -821,9 +699,9 @@ class MLExplorer:
         """
         # Exclude non-feature columns
         exclude_cols = [
-            'player_id', 'name', 'team', 'season', 'cluster', 'tier',
-            'pca1', 'pca2', 'gsis_id', 'position', 'fantasy_points',
-            'fantasy_points_per_game', 'fantasy_points_ppr'
+            'player_id', 'name', 'team', 'season', 'cluster', 'tier', 'pca1', 'pca2', 
+            'gsis_id', 'position', 'projected_points', 'ppr_sh', 'fantasy_points', 'ceiling_factor',
+            'fantasy_points_ppr', 'fantasy_points_per_game', 'fantasy_points_per_attempt'
         ]
         
         # Get all numeric columns
@@ -887,7 +765,7 @@ class MLExplorer:
         # Filter to features that actually exist in the data
         available_features = [f for f in key_features if f in data.columns]
         
-        # If we have few features, add more
+        # If only have few features, add more
         if len(available_features) < 3 and 'fantasy_points_per_game' in data.columns:
             # Find features most correlated with fantasy points
             numeric_cols = data.select_dtypes(include=['number']).columns
@@ -1073,9 +951,6 @@ class MLExplorer:
         
         # Create feature importance plots
         self.create_feature_importance_plots()
-        
-        # Create pair plots
-        self.create_pair_plots()
         
         # Create enhanced cluster visualizations
         self.create_cluster_visualizations()

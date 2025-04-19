@@ -617,7 +617,7 @@ class PlayerProjectionModel:
         
         return metrics
 
-    def find_optimal_hyperparameters(self, position, model_type='xgboost', n_trials=50):
+    def find_optimal_hyperparameters(self, position, model_type='xgboost', n_trials=500):
         """
         Find optimal hyperparameters using Optuna
         
@@ -666,10 +666,10 @@ class PlayerProjectionModel:
             # Define hyperparameters to tune based on model type
             if model_type == 'random_forest':
                 hyperparams = {
-                    'n_estimators': trial.suggest_int('n_estimators', 50, 300),
-                    'max_depth': trial.suggest_int('max_depth', 3, 20),
-                    'min_samples_split': trial.suggest_int('min_samples_split', 2, 20),
-                    'min_samples_leaf': trial.suggest_int('min_samples_leaf', 1, 10)
+                    'n_estimators': trial.suggest_int('n_estimators', 10, 1000),
+                    'max_depth': trial.suggest_int('max_depth', 3, 50),
+                    'min_samples_split': trial.suggest_int('min_samples_split', 2, 500),
+                    'min_samples_leaf': trial.suggest_int('min_samples_leaf', 1, 25)
                 }
             elif model_type == 'gradient_boosting':
                 hyperparams = {
@@ -681,12 +681,12 @@ class PlayerProjectionModel:
                 }
             elif model_type == 'xgboost':
                 hyperparams = {
-                    'n_estimators': trial.suggest_int('n_estimators', 50, 300),
-                    'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3),
-                    'max_depth': trial.suggest_int('max_depth', 2, 12),
-                    'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
-                    'subsample': trial.suggest_float('subsample', 0.5, 1.0),
-                    'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0)
+                    'n_estimators': trial.suggest_int('n_estimators', 10, 500),
+                    'learning_rate': trial.suggest_float('learning_rate', 0.0001, 0.3),
+                    'max_depth': trial.suggest_int('max_depth', 2, 25),
+                    'min_child_weight': trial.suggest_int('min_child_weight', 0.1, 10),
+                    'subsample': trial.suggest_float('subsample', 0.2, 1.0),
+                    'colsample_bytree': trial.suggest_float('colsample_bytree', 0.2, 1.0)
                 }
             elif model_type == 'lightgbm':
                 hyperparams = {
@@ -750,7 +750,7 @@ class PlayerProjectionModel:
         
         # Create Optuna study
         study = optuna.create_study(direction='minimize')
-        study.optimize(objective, n_trials=n_trials, timeout=600)  # 10 minute timeout
+        study.optimize(objective, n_trials=n_trials, timeout=60000)  # 10 minute timeout
         
         # Get best hyperparameters
         best_params = study.best_params
@@ -899,156 +899,157 @@ class PlayerProjectionModel:
         
         return final_features
     
-    def train_hierarchical_model(self, position, model_type='xgboost', hyperparams=None):
-        """
-        Train hierarchical model for a position
+    #DOES NOT WORK RIGHT NOW
+    # def train_hierarchical_model(self, position, model_type='xgboost', hyperparams=None):
+    #     """
+    #     Train hierarchical model for a position
         
-        Parameters:
-        -----------
-        position : str
-            Position to train for ('qb', 'rb', 'wr', 'te')
-        model_type : str
-            Type of model ('random_forest', 'gradient_boosting', 'xgboost', 'lightgbm')
-        hyperparams : dict, optional
-            Model hyperparameters
+    #     Parameters:
+    #     -----------
+    #     position : str
+    #         Position to train for ('qb', 'rb', 'wr', 'te')
+    #     model_type : str
+    #         Type of model ('random_forest', 'gradient_boosting', 'xgboost', 'lightgbm')
+    #     hyperparams : dict, optional
+    #         Model hyperparameters
             
-        Returns:
-        --------
-        dict
-            Dictionary of component models and metrics
-        """
-        logger.info(f"Training hierarchical model for {position}...")
+    #     Returns:
+    #     --------
+    #     dict
+    #         Dictionary of component models and metrics
+    #     """
+    #     logger.info(f"Training hierarchical model for {position}...")
         
-        # Get hierarchical components for this position
-        components = self._get_hierarchical_components(position)
+    #     # Get hierarchical components for this position
+    #     components = self._get_hierarchical_components(position)
         
-        if not components:
-            logger.warning(f"No hierarchical components defined for {position}")
-            return None
+    #     if not components:
+    #         logger.warning(f"No hierarchical components defined for {position}")
+    #         return None
         
-        # Get training data
-        train_key = f"{position}_train"
+    #     # Get training data
+    #     train_key = f"{position}_train"
         
-        if train_key not in self.feature_sets or self.feature_sets[train_key].empty:
-            logger.warning(f"No {position} training data available")
-            return None
+    #     if train_key not in self.feature_sets or self.feature_sets[train_key].empty:
+    #         logger.warning(f"No {position} training data available")
+    #         return None
         
-        # Get training data
-        train_data = self.feature_sets[train_key].copy()
+    #     # Get training data
+    #     train_data = self.feature_sets[train_key].copy()
         
-        # Apply meaningful sample filtering
-        train_data = self._filter_meaningful_samples(train_data, position)
+    #     # Apply meaningful sample filtering
+    #     train_data = self._filter_meaningful_samples(train_data, position)
         
-        # Calculate any missing component metrics if needed
-        train_data = self._prepare_component_metrics(train_data, position, components)
+    #     # Calculate any missing component metrics if needed
+    #     train_data = self._prepare_component_metrics(train_data, position, components)
         
-        # Train a model for each component
-        component_models = {}
+    #     # Train a model for each component
+    #     component_models = {}
         
-        for component in components:
-            component_name = component['name']
+    #     for component in components:
+    #         component_name = component['name']
             
-            # Skip if component not in data
-            if component_name not in train_data.columns:
-                logger.warning(f"Component {component_name} not found in {position} data")
-                continue
+    #         # Skip if component not in data
+    #         if component_name not in train_data.columns:
+    #             logger.warning(f"Component {component_name} not found in {position} data")
+    #             continue
             
-            logger.info(f"Training model for {position} {component_name}...")
+    #         logger.info(f"Training model for {position} {component_name}...")
             
-            # Select features based on component type
-            if component['type'] == 'volume':
-                # For volume metrics, focus on usage, team context, and career stage
-                feature_types = ['usage', 'team', 'career']
-            else:
-                # For efficiency metrics, focus on skill, physical traits, and experience
-                feature_types = ['skill', 'physical', 'experience']
+    #         # Select features based on component type
+    #         if component['type'] == 'volume':
+    #             # For volume metrics, focus on usage, team context, and career stage
+    #             feature_types = ['usage', 'team', 'career']
+    #         else:
+    #             # For efficiency metrics, focus on skill, physical traits, and experience
+    #             feature_types = ['skill', 'physical', 'experience']
             
-            # Select features for this component
-            selected_features = self.select_features_with_method(position, method='importance', top_n=15)
+    #         # Select features for this component
+    #         selected_features = self.select_features_with_method(position, method='importance', top_n=15)
             
-            # Create model
-            model = self._create_model(model_type, hyperparams)
+    #         # Create model
+    #         model = self._create_model(model_type, hyperparams)
             
-            # Get all available years
-            all_years = sorted(train_data['season'].unique())
+    #         # Get all available years
+    #         all_years = sorted(train_data['season'].unique())
             
-            if len(all_years) < 2:
-                logger.warning(f"Need at least 2 years of data for {component_name} model. Found: {len(all_years)}")
-                continue
+    #         if len(all_years) < 2:
+    #             logger.warning(f"Need at least 2 years of data for {component_name} model. Found: {len(all_years)}")
+    #             continue
             
-            # Time series validation for this component
-            validation_results = []
+    #         # Time series validation for this component
+    #         validation_results = []
             
-            # For each test year (starting from the second year)
-            for i in range(1, len(all_years)):
-                test_year = all_years[i]
-                train_years = all_years[:i]
+    #         # For each test year (starting from the second year)
+    #         for i in range(1, len(all_years)):
+    #             test_year = all_years[i]
+    #             train_years = all_years[:i]
                 
-                # Create train/test split based on years
-                train_mask = train_data['season'].isin(train_years)
-                test_mask = train_data['season'] == test_year
+    #             # Create train/test split based on years
+    #             train_mask = train_data['season'].isin(train_years)
+    #             test_mask = train_data['season'] == test_year
                 
-                # Get X and y for train and test
-                X_train = train_data.loc[train_mask, selected_features].fillna(0)
-                y_train = train_data.loc[train_mask, component_name].fillna(0)
+    #             # Get X and y for train and test
+    #             X_train = train_data.loc[train_mask, selected_features].fillna(0)
+    #             y_train = train_data.loc[train_mask, component_name].fillna(0)
                 
-                X_test = train_data.loc[test_mask, selected_features].fillna(0)
-                y_test = train_data.loc[test_mask, component_name].fillna(0)
+    #             X_test = train_data.loc[test_mask, selected_features].fillna(0)
+    #             y_test = train_data.loc[test_mask, component_name].fillna(0)
                 
-                # Skip if we have too little data
-                if len(X_train) < 10 or len(X_test) < 5:
-                    logger.warning(f"Skipping year {test_year} for {component_name} due to insufficient data")
-                    continue
+    #             # Skip if we have too little data
+    #             if len(X_train) < 10 or len(X_test) < 5:
+    #                 logger.warning(f"Skipping year {test_year} for {component_name} due to insufficient data")
+    #                 continue
                 
-                # Fit model on training data
-                model.fit(X_train, y_train)
+    #             # Fit model on training data
+    #             model.fit(X_train, y_train)
                 
-                # Evaluate on test set
-                test_pred = model.predict(X_test)
-                test_rmse = np.sqrt(mean_squared_error(y_test, test_pred))
+    #             # Evaluate on test set
+    #             test_pred = model.predict(X_test)
+    #             test_rmse = np.sqrt(mean_squared_error(y_test, test_pred))
                 
-                # Store validation result
-                validation_results.append({
-                    'test_year': test_year,
-                    'test_rmse': test_rmse,
-                    'test_samples': len(X_test)
-                })
+    #             # Store validation result
+    #             validation_results.append({
+    #                 'test_year': test_year,
+    #                 'test_rmse': test_rmse,
+    #                 'test_samples': len(X_test)
+    #             })
             
-            # Train final model on all data
-            X_all = train_data[selected_features].fillna(0)
-            y_all = train_data[component_name].fillna(0)
+    #         # Train final model on all data
+    #         X_all = train_data[selected_features].fillna(0)
+    #         y_all = train_data[component_name].fillna(0)
             
-            # Fit final model
-            model.fit(X_all, y_all)
+    #         # Fit final model
+    #         model.fit(X_all, y_all)
             
-            # Calculate metrics on all data
-            all_pred = model.predict(X_all)
+    #         # Calculate metrics on all data
+    #         all_pred = model.predict(X_all)
             
-            metrics = {
-                'rmse': np.sqrt(mean_squared_error(y_all, all_pred)),
-                'mae': mean_absolute_error(y_all, all_pred),
-                'r2': r2_score(y_all, all_pred)
-            }
+    #         metrics = {
+    #             'rmse': np.sqrt(mean_squared_error(y_all, all_pred)),
+    #             'mae': mean_absolute_error(y_all, all_pred),
+    #             'r2': r2_score(y_all, all_pred)
+    #         }
             
-            # Store model info
-            component_models[component_name] = {
-                'model': model,
-                'features': selected_features,
-                'metrics': metrics,
-                'validation_results': validation_results
-            }
+    #         # Store model info
+    #         component_models[component_name] = {
+    #             'model': model,
+    #             'features': selected_features,
+    #             'metrics': metrics,
+    #             'validation_results': validation_results
+    #         }
             
-            logger.info(f"Completed {position} {component_name} model. RMSE: {metrics['rmse']:.4f}, R²: {metrics['r2']:.4f}")
+    #         logger.info(f"Completed {position} {component_name} model. RMSE: {metrics['rmse']:.4f}, R²: {metrics['r2']:.4f}")
         
-        # Store hierarchical models
-        self.hierarchical_models[position] = {
-            'components': components,
-            'models': component_models
-        }
+    #     # Store hierarchical models
+    #     self.hierarchical_models[position] = {
+    #         'components': components,
+    #         'models': component_models
+    #     }
         
-        logger.info(f"Completed hierarchical modeling for {position}")
+    #     logger.info(f"Completed hierarchical modeling for {position}")
         
-        return component_models
+    #     return component_models
 
     def _prepare_component_metrics(self, data, position, components):
         """
@@ -1408,7 +1409,7 @@ class PlayerProjectionModel:
                 # Recalculate fantasy points with ceiling components
                 if position == 'qb':
                     if all(col in result.columns for col in ['projected_passing_yards_per_game_ceiling', 'projected_passing_tds_per_game_ceiling',
-                                                         'projected_rushing_yards_per_game_ceiling']):
+                                                            'projected_rushing_yards_per_game_ceiling']):
                         result['ceiling_projection'] = (
                             result['projected_passing_yards_per_game_ceiling'] * 0.04 +
                             result['projected_passing_tds_per_game_ceiling'] * 4 +
@@ -1417,8 +1418,8 @@ class PlayerProjectionModel:
                         )
                 elif position == 'rb':
                     if all(col in result.columns for col in ['projected_rushing_yards_per_game_ceiling', 'projected_rushing_tds_per_game_ceiling',
-                                                         'projected_receiving_yards_per_game_ceiling', 'projected_receiving_tds_per_game_ceiling',
-                                                         'projected_receptions_per_game_ceiling']):
+                                                            'projected_receiving_yards_per_game_ceiling', 'projected_receiving_tds_per_game_ceiling',
+                                                            'projected_receptions_per_game_ceiling']):
                         result['ceiling_projection'] = (
                             result['projected_rushing_yards_per_game_ceiling'] * 0.1 +
                             result['projected_rushing_tds_per_game_ceiling'] * 6 +
@@ -1428,7 +1429,7 @@ class PlayerProjectionModel:
                         )
                 elif position in ['wr', 'te']:
                     if all(col in result.columns for col in ['projected_receiving_yards_per_game_ceiling', 'projected_receiving_tds_per_game_ceiling',
-                                                         'projected_receptions_per_game_ceiling']):
+                                                            'projected_receptions_per_game_ceiling']):
                         result['ceiling_projection'] = (
                             result['projected_receiving_yards_per_game_ceiling'] * 0.1 +
                             result['projected_receiving_tds_per_game_ceiling'] * 6 +
@@ -1521,31 +1522,399 @@ class PlayerProjectionModel:
         
         return result
 
-    def train_all_hierarchical_models(self, model_type='xgboost', hyperparams=None):
-        """
-        Train hierarchical models for all positions
+    # DOESNT WORK RN
+    # def train_all_hierarchical_models(self, model_type='xgboost', hyperparams=None):
+    #     """
+    #     Train hierarchical models for all positions
         
+    #     Parameters:
+    #     -----------
+    #     model_type : str
+    #         Type of model ('random_forest', 'gradient_boosting', 'xgboost', 'lightgbm')
+    #     hyperparams : dict, optional
+    #         Model hyperparameters
+            
+    #     Returns:
+    #     --------
+    #     dict
+    #         Dictionary of hierarchical models by position
+    #     """
+    #     all_models = {}
+        
+    #     for position in ['qb', 'rb', 'wr', 'te']:
+    #         models = self.train_hierarchical_model(position, model_type, hyperparams)
+            
+    #         if models:
+    #             all_models[position] = models
+        
+    #     return all_models
+
+    def _find_optimal_component_hyperparams(self, position, component_name, component_target_data, model_type='xgboost', n_trials=25, feature_selection_method='importance', top_n_features=15):
+        """
+        Find optimal hyperparameters for a single hierarchical component model using Optuna.
+
+        Parameters:
+        -----------
+        position : str
+            Player position ('qb', 'rb', 'wr', 'te').
+        component_name : str
+            Name of the component being modeled (e.g., 'attempts_per_game').
+        component_target_data : pd.DataFrame
+            DataFrame containing features and the specific component metric as the target.
+             It MUST contain 'player_id' and 'season' columns.
+        model_type : str
+            Type of model ('random_forest', 'gradient_boosting', 'xgboost', 'lightgbm').
+        n_trials : int
+            Number of Optuna optimization trials.
+        feature_selection_method : str
+            Method for selecting features for the component model.
+        top_n_features : int
+            Number of features to select for the component model.
+
+        Returns:
+        --------
+        dict or None
+            Best hyperparameters found, or None if optimization fails or is skipped.
+        """
+        if not OPTUNA_AVAILABLE:
+            logger.warning("Optuna not installed. Skipping component hyperparameter optimization.")
+            return None
+
+        if component_target_data.empty or component_name not in component_target_data.columns:
+            logger.warning(f"No data or target column '{component_name}' found for {position} component HPO.")
+            return None
+
+        # Make a copy to avoid modifying original
+        data_for_hpo = component_target_data.copy()
+
+        # Ensure target is numeric and handle NaNs
+        data_for_hpo[component_name] = pd.to_numeric(data_for_hpo[component_name], errors='coerce')
+        data_for_hpo = data_for_hpo.dropna(subset=[component_name]) # Drop rows where target is NaN
+
+        if data_for_hpo.empty:
+            logger.warning(f"No valid target data for {component_name} after cleaning.")
+            return None
+
+        # --- Feature Selection specifically for this component ---
+        # Select base features excluding the target itself and identifiers
+        potential_features = self._select_features(data_for_hpo) # Use the base feature selection logic
+        # Remove the component target if it accidentally got included
+        potential_features = [f for f in potential_features if f != component_name]
+
+        if len(potential_features) < 3:
+            logger.warning(f"Not enough base features for component {component_name} HPO.")
+            return None
+
+        # Prepare data for feature selection method
+        X_fs = data_for_hpo[potential_features].fillna(0)
+        y_fs = data_for_hpo[component_name] # Already cleaned
+
+        # Apply feature selection method 
+        selected_component_features = []
+        try:
+            # Use a simple RF for quick importance/RFE/SHAP estimate during HPO feature selection
+            temp_estimator = RandomForestRegressor(n_estimators=50, random_state=42, n_jobs=1)
+
+            if feature_selection_method == 'importance':
+                temp_estimator.fit(X_fs, y_fs)
+                importances = temp_estimator.feature_importances_
+                indices = np.argsort(importances)[::-1]
+                selected_component_features = [potential_features[i] for i in indices[:top_n_features]]
+            elif feature_selection_method == 'rfe':
+                # Use RFECV if enough data, else basic RFE
+                if len(X_fs) > 100: # Arbitrary threshold for CV
+                     selector = RFECV(temp_estimator, step=1, cv=3, scoring='neg_mean_squared_error', min_features_to_select=max(5, top_n_features // 2), n_jobs=1)
+                else:
+                    selector = RFE(temp_estimator, n_features_to_select=top_n_features, step=1)
+                selector.fit(X_fs, y_fs)
+                selected_component_features = [potential_features[i] for i, supported in enumerate(selector.support_) if supported]
+            elif feature_selection_method == 'shap' and SHAP_AVAILABLE:
+                temp_estimator.fit(X_fs, y_fs)
+                explainer = shap.TreeExplainer(temp_estimator)
+                shap_values = explainer.shap_values(X_fs)
+                mean_shap = np.abs(shap_values).mean(axis=0)
+                indices = np.argsort(mean_shap)[::-1]
+                selected_component_features = [potential_features[i] for i in indices[:top_n_features]]
+            else: # Default or fallback to importance
+                logger.warning(f"Using importance selection for {component_name} due to method '{feature_selection_method}' or missing SHAP.")
+                temp_estimator.fit(X_fs, y_fs)
+                importances = temp_estimator.feature_importances_
+                indices = np.argsort(importances)[::-1]
+                selected_component_features = [potential_features[i] for i in indices[:top_n_features]]
+
+            if not selected_component_features or len(selected_component_features) < 2:
+                logger.warning(f"Feature selection yielded < 2 features for {component_name}. Using top 5 potential features.")
+                selected_component_features = potential_features[:5] # Fallback
+
+            logger.debug(f"Selected {len(selected_component_features)} features for {component_name} HPO.")
+
+        except Exception as fs_err:
+            logger.error(f"Feature selection failed during component HPO for {component_name}: {fs_err}. Using top 5 potential features.")
+            selected_component_features = potential_features[:5]
+        # -----------------------------------------------------
+
+        # Prepare final data for Optuna objective using selected features
+        X_hpo = data_for_hpo[selected_component_features].fillna(0)
+        y_hpo = data_for_hpo[component_name]
+        seasons_hpo = data_for_hpo['season'] # Need season for time-series split
+
+        # Get available years for time series validation within HPO
+        all_years = sorted(seasons_hpo.unique())
+        if len(all_years) < 3:
+            logger.warning(f"Need at least 3 years of data for HPO time series validation ({component_name}). Found: {len(all_years)}. Skipping HPO.")
+            return None
+
+        # Define Optuna objective function
+        def objective(trial):
+            # Suggest hyperparameters (same logic as main HPO function)
+            hyperparams = {}
+            if model_type == 'xgboost':
+                hyperparams = {
+                    'n_estimators': trial.suggest_int('n_estimators', 30, 200, step=10),
+                    'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.2, log=True),
+                    'max_depth': trial.suggest_int('max_depth', 2, 8),
+                    'min_child_weight': trial.suggest_int('min_child_weight', 1, 8),
+                    'subsample': trial.suggest_float('subsample', 0.6, 1.0),
+                    'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
+                    'reg_alpha': trial.suggest_float('reg_alpha', 1e-4, 1.0, log=True),
+                    'reg_lambda': trial.suggest_float('reg_lambda', 1e-4, 1.0, log=True),
+                }
+            elif model_type == 'lightgbm':
+                hyperparams = {
+                    'n_estimators': trial.suggest_int('n_estimators', 30, 200, step=10),
+                    'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.2, log=True),
+                    'num_leaves': trial.suggest_int('num_leaves', 8, 64),
+                    'max_depth': trial.suggest_int('max_depth', 3, 10),
+                    'min_child_samples': trial.suggest_int('min_child_samples', 5, 30), # Renamed from min_data_in_leaf
+                    'subsample': trial.suggest_float('subsample', 0.6, 1.0),
+                    'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
+                    'reg_alpha': trial.suggest_float('reg_alpha', 1e-4, 1.0, log=True),
+                    'reg_lambda': trial.suggest_float('reg_lambda', 1e-4, 1.0, log=True),
+                }
+            # NEEd to Add other model types (RF, GB)
+            else:
+                logger.warning(f"HPO not implemented for model type: {model_type}. Using defaults.")
+                hyperparams = None # Use defaults in _create_model
+
+            # Time series validation within the trial
+            cv_scores = []
+            # Use last 2 or 3 years for validation folds
+            num_val_years = min(3, max(1, len(all_years) - 2))
+            start_val_index = len(all_years) - num_val_years
+
+            for i in range(start_val_index, len(all_years)):
+                test_year = all_years[i]
+                train_years = all_years[:i]
+
+                train_mask = seasons_hpo.isin(train_years)
+                test_mask = seasons_hpo == test_year
+
+                X_train, X_test = X_hpo[train_mask], X_hpo[test_mask]
+                y_train, y_test = y_hpo[train_mask], y_hpo[test_mask]
+
+                if len(X_train) < 10 or len(X_test) < 5: continue
+
+                model = self._create_model(model_type, hyperparams)
+                try:
+                    model.fit(X_train, y_train)
+                    test_pred = model.predict(X_test)
+                    test_rmse = np.sqrt(mean_squared_error(y_test, test_pred))
+                    if np.isfinite(test_rmse):
+                        cv_scores.append(test_rmse)
+                except Exception as fit_err:
+                    logger.debug(f"Trial {trial.number} fit/pred failed for year {test_year}: {fit_err}")
+                    return float('inf') # Penalize failed fits
+
+            if not cv_scores: return float('inf')
+            avg_rmse = np.mean(cv_scores)
+
+            # Optuna pruning check
+            trial.report(avg_rmse, i) # Use last year index as step
+            if trial.should_prune():
+                raise optuna.TrialPruned()
+
+            return avg_rmse
+
+        # --- Run Optuna Study ---
+        study_name = f"component_{position}_{component_name}_{model_type}"
+        logger.info(f"Starting Optuna study '{study_name}' for {component_name} ({n_trials} trials)...")
+        study = optuna.create_study(direction='minimize', study_name=study_name, load_if_exists=False) # Don't reuse component studies usually
+                                # sampler=optuna.samplers.TPESampler(seed=42)) # Optional: Use TPE sampler
+                                # pruner=optuna.pruners.MedianPruner(n_warmup_steps=3)) # Optional: Add pruning
+        try:
+            study.optimize(objective, n_trials=n_trials, timeout=300, n_jobs=1) # Short timeout per component, no parallelism inside HPO func
+            best_params = study.best_params
+            logger.info(f"Optuna finished for {component_name}. Best RMSE: {study.best_value:.4f}")
+            logger.info(f"Best hyperparameters: {best_params}")
+            return best_params
+        except Exception as opt_err:
+            logger.error(f"Optuna optimization failed for {component_name}: {opt_err}", exc_info=True)
+            return None
+
+    def train_hierarchical_model(self, position, model_type='xgboost', hyperparams=None, optimize_hyperparams=False, feature_selection_method='importance'):
+        """
+        Train hierarchical model for a position, with optional HPO for components.
+
+        Parameters:
+        -----------
+        position : str
+            Position to train for ('qb', 'rb', 'wr', 'te').
+        model_type : str
+            Type of model for components ('random_forest', 'gradient_boosting', 'xgboost', 'lightgbm').
+        hyperparams : dict, optional
+            Default hyperparameters if optimization is not used or fails.
+        optimize_hyperparams : bool
+            Whether to run Optuna HPO for each component model.
+        feature_selection_method : str
+            Method used to select features *for each component model*.
+        """
+        logger.info(f"Training hierarchical model for {position} (Optimize Components: {optimize_hyperparams}, Feat Sel: {feature_selection_method})...")
+
+        components = self._get_hierarchical_components(position)
+        if not components: logger.warning(f"No hierarchical components defined for {position}"); return None
+
+        train_key = f"{position}_train"
+        if train_key not in self.feature_sets or self.feature_sets[train_key].empty:
+            logger.warning(f"No {position} training data available"); return None
+
+        train_data_full = self.feature_sets[train_key].copy()
+        train_data_full = self._filter_meaningful_samples(train_data_full, position)
+        train_data_full = self._prepare_component_metrics(train_data_full, position, components) # Ensure targets exist
+
+        component_models = {}
+        top_n_comp_features = 15 # Number of features for component models
+
+        for component in components:
+            component_name = component['name']
+            component_type = component['type']
+
+            if component_name not in train_data_full.columns:
+                logger.warning(f"Component target {component_name} not found in {position} data. Skipping."); continue
+
+            # --- HPO for this component (if enabled) ---
+            component_hyperparams = hyperparams # Start with default/passed params
+            if optimize_hyperparams:
+                logger.info(f"--- Optimizing Hyperparameters for Component: {component_name} ---")
+                # Select base features *excluding* the current component target
+                base_features_for_hpo = self._select_features(train_data_full)
+                base_features_for_hpo = [f for f in base_features_for_hpo if f != component_name] # Exclude target
+
+                # --- Construct unique columns list for HPO data ---
+                hpo_cols_list = ['player_id', 'season', component_name] + base_features_for_hpo
+                hpo_cols_list = list(dict.fromkeys(hpo_cols_list)) # Efficient way to remove duplicates while preserving order
+
+                # -----------------------------------------
+                comp_data_for_hpo = train_data_full[hpo_cols_list].copy()
+
+                best_comp_params = self._find_optimal_component_hyperparams(
+                    position, component_name, comp_data_for_hpo, model_type,
+                    n_trials=25,
+                    feature_selection_method=feature_selection_method,
+                    top_n_features=top_n_comp_features
+                )
+                if best_comp_params:
+                    component_hyperparams = best_comp_params
+                else:
+                    logger.warning(f"Component HPO failed for {component_name}, using default/passed hyperparameters.")
+
+                logger.info(f"Training final model for {position} component: {component_name}...")
+
+            # --- Feature Selection for final component model ---
+            # Similar logic to HPO feature selection, but on the full training data for this component
+            potential_features_final = self._select_features(train_data_full)
+            potential_features_final = [f for f in potential_features_final if f != component_name]
+            selected_features_final = potential_features_final[:top_n_comp_features] # Default if selection fails
+
+            if len(potential_features_final) >= 3:
+                X_fs_final = train_data_full[potential_features_final].fillna(0)
+                y_fs_final = train_data_full[component_name].fillna(0) # Use original target
+                try:
+                    # Re-run feature selection on the full component data
+                    temp_estimator = RandomForestRegressor(n_estimators=50, random_state=42, n_jobs=1)
+                    if feature_selection_method == 'importance':
+                        temp_estimator.fit(X_fs_final, y_fs_final)
+                        importances = temp_estimator.feature_importances_
+                        indices = np.argsort(importances)[::-1]
+                        selected_features_final = [potential_features_final[i] for i in indices[:top_n_comp_features]]
+                    # Add other methods (rfe, shap) if needed, mirroring HPO logic
+                    else:
+                        temp_estimator.fit(X_fs_final, y_fs_final)
+                        importances = temp_estimator.feature_importances_
+                        indices = np.argsort(importances)[::-1]
+                        selected_features_final = [potential_features_final[i] for i in indices[:top_n_comp_features]]
+
+                    if not selected_features_final or len(selected_features_final) < 2:
+                        selected_features_final = potential_features_final[:top_n_comp_features]
+                except Exception as fs_final_err:
+                    logger.error(f"Final feature selection failed for {component_name}: {fs_final_err}")
+                    selected_features_final = potential_features_final[:top_n_comp_features]
+            # -----------------------------------------------
+
+            # --- Train Final Component Model ---
+            model = self._create_model(model_type, component_hyperparams) # Use potentially optimized params
+            X_all_comp = train_data_full[selected_features_final].fillna(0)
+            y_all_comp = train_data_full[component_name].fillna(0)
+
+            if X_all_comp.empty or y_all_comp.empty:
+                logger.warning(f"No data to train final model for component {component_name}. Skipping.")
+                continue
+
+            try:
+                model.fit(X_all_comp, y_all_comp)
+                # --- Evaluate on ALL data (In-sample - less reliable than HPO CV) ---
+                all_pred = model.predict(X_all_comp)
+                metrics = {
+                    'rmse': np.sqrt(mean_squared_error(y_all_comp, all_pred)),
+                    'mae': mean_absolute_error(y_all_comp, all_pred),
+                    'r2': r2_score(y_all_comp, all_pred)
+                }
+                # --- Store model info ---
+                component_models[component_name] = {
+                    'model': model,
+                    'features': selected_features_final,
+                    'metrics': metrics,
+                    'hyperparameters': component_hyperparams # Store used hyperparameters
+                    # 'validation_results': validation_results # HPO study holds validation results now
+                }
+                logger.info(f"Completed {position} {component_name} model. In-sample RMSE: {metrics['rmse']:.4f}, R²: {metrics['r2']:.4f}")
+            except Exception as final_fit_err:
+                logger.error(f"Failed to fit final model for component {component_name}: {final_fit_err}", exc_info=True)
+
+
+        self.hierarchical_models[position] = {'components': components, 'models': component_models}
+        logger.info(f"Completed hierarchical modeling for {position}")
+        return component_models
+
+    # --- train_all_hierarchical_models ---
+    def train_all_hierarchical_models(self, model_type='xgboost', hyperparams=None, optimize_hyperparams=False, feature_selection_method='importance'):
+        """
+        Train hierarchical models for all positions, passing optimization flags.
+
         Parameters:
         -----------
         model_type : str
-            Type of model ('random_forest', 'gradient_boosting', 'xgboost', 'lightgbm')
+            Model type for components.
         hyperparams : dict, optional
-            Model hyperparameters
-            
-        Returns:
-        --------
-        dict
-            Dictionary of hierarchical models by position
+            Default hyperparameters.
+        optimize_hyperparams : bool
+            Whether to optimize hyperparameters for each component.
+        feature_selection_method : str
+            Feature selection method for each component.
         """
         all_models = {}
-        
         for position in ['qb', 'rb', 'wr', 'te']:
-            models = self.train_hierarchical_model(position, model_type, hyperparams)
-            
+            # Pass the flags down to the individual training function
+            models = self.train_hierarchical_model(
+                position,
+                model_type=model_type,
+                hyperparams=hyperparams,
+                optimize_hyperparams=optimize_hyperparams,
+                feature_selection_method=feature_selection_method
+            )
             if models:
                 all_models[position] = models
-        
         return all_models
+
 
     def generate_full_projections(self, projection_data=None, use_do_not_draft=True, use_hierarchical=True):
         """

@@ -29,7 +29,7 @@ def calculate_replacement_levels(projections_df, league_settings):
     req_op = starter_slots.get('OP', 0)
     req_flex = starter_slots.get('RB/WR/TE', 0)
 
-    # Distribute OP/Flex needs (simplified proportional approach)
+    # Distribute OP/Flex needs 
     if req_op > 0:
         op_weight_qb = 0.7; op_weight_other = (1.0 - op_weight_qb) / 3.0
         num_starters_per_pos['QB'] += req_op * op_weight_qb
@@ -143,7 +143,7 @@ class DraftManager:
 
         except Exception as e:
             self.logger.error(f"Error initializing DraftManager: {e}", exc_info=True)
-            raise # Re-raise the error to be caught by the GUI
+            raise 
 
     def _get_max_pos_counts(self, roster_settings):
         """Determine max players per position from full roster settings."""
@@ -168,7 +168,7 @@ class DraftManager:
             current_round_order = list(base_order) if (i + 1) % 2 == 1 else list(reversed(base_order))
             full_order.extend(current_round_order)
         if len(full_order) != self.total_picks:
-             raise ValueError("Generated draft order length mismatch.")
+            raise ValueError("Generated draft order length mismatch.")
         return full_order
 
     def get_current_status(self):
@@ -226,15 +226,6 @@ class DraftManager:
                 self.logger.warning(f"Multiple exact name matches found for '{player_query}'. Returning first.")
             return match.iloc[0].to_dict()
 
-        # Try partial match (contains) - be careful with this
-        # match = available[available['name'].str.lower().str.contains(query_lower)]
-        # if not match.empty:
-        #     if len(match) == 1:
-        #         return match.iloc[0].to_dict()
-        #     else:
-        #         self.logger.warning(f"Multiple partial name matches for '{player_query}'. Requires exact match.")
-        #         return None # Ambiguous
-
         return None # No match found
 
     def make_opponent_pick(self, player_dict):
@@ -250,7 +241,7 @@ class DraftManager:
 
         if player_id in self.drafted_player_ids:
             self.logger.error(f"Opponent pick error: Player {player_id} already drafted.")
-            return False # Should be checked by GUI calling find_player first
+            return False 
 
         current_team_id = self.draft_order[self.current_pick_overall]
         player_pos = player_dict.get('position', 'UNK')
@@ -275,7 +266,7 @@ class DraftManager:
 
         if player_id in self.drafted_player_ids:
             self.logger.error(f"Agent pick error: Player {player_id} already drafted.")
-            return False # Should be checked by GUI
+            return False 
 
         current_team_id = self.agent_team_id # It must be the agent's turn
         player_pos = player_dict.get('position', 'UNK')
@@ -319,19 +310,17 @@ class DraftManager:
         if not self.projections_master.empty and column_name in self.projections_master.columns:
             max_val = self.projections_master[column_name].max()
         if pd.isna(max_val) or max_val <= 0:
-             max_val = 15.0 # Fallback
-             self.logger.warning(f"Invalid Max Value for {column_name} ({max_val}). Using fallback {max_val}")
+            max_val = 15.0 # Fallback
+            self.logger.warning(f"Invalid Max Value for {column_name} ({max_val}). Using fallback {max_val}")
         return max_val
 
     def _get_state_vector(self):
         """Constructs the state vector for the RL model."""
-        # This needs to EXACTLY match the state construction in FantasyDraftEnv._get_state
         try:
             state = np.zeros(self.state_size, dtype=np.float32)
             current_available = self.get_available_players(limit=None) # Get all available, sorted by risk_adj_vorp
             idx = 0
 
-            # --- Replicate State Construction from FantasyDraftEnv ---
             # 1. Pick Normalization
             state[idx] = min(1.0, self.current_pick_overall / max(1, self.total_picks - 1)); idx += 1
 
@@ -348,8 +337,8 @@ class DraftManager:
             agent_roster = self.teams_rosters.get(self.agent_team_id, [])
             counts = {'QB': 0, 'RB': 0, 'WR': 0, 'TE': 0}
             for p in agent_roster:
-                 pos = p.get('position');
-                 if pos in counts: counts[pos]+=1
+                pos = p.get('position');
+                if pos in counts: counts[pos]+=1
             for pos in ['QB', 'RB', 'WR', 'TE']:
                 max_c = max(1, self.max_pos_counts.get(pos, 1))
                 state[idx] = min(1.0, counts.get(pos, 0) / max_c); idx += 1
@@ -358,7 +347,7 @@ class DraftManager:
             recent = self.recent_picks_pos[-RECENT_PICKS_WINDOW:]
             runs = {'QB': 0, 'RB': 0, 'WR': 0, 'TE': 0}
             for pos in recent:
-                 if pos in runs: runs[pos] += 1
+                if pos in runs: runs[pos] += 1
             norm_recent = max(1, len(recent))
             for pos in ['QB', 'RB', 'WR', 'TE']:
                 state[idx] = runs.get(pos, 0) / norm_recent; idx += 1
@@ -404,19 +393,18 @@ class DraftManager:
             top_5 = current_available.head(5)
             top_5_avg_value = 0.0
             if not top_5.empty and 'risk_adjusted_vorp' in top_5.columns:
-                 top_5_numeric = pd.to_numeric(top_5['risk_adjusted_vorp'], errors='coerce')
-                 top_5_avg_value = top_5_numeric.mean();
-                 if pd.isna(top_5_avg_value): top_5_avg_value = 0.0
+                top_5_numeric = pd.to_numeric(top_5['risk_adjusted_vorp'], errors='coerce')
+                top_5_avg_value = top_5_numeric.mean();
+                if pd.isna(top_5_avg_value): top_5_avg_value = 0.0
             norm_max_risk_adj = max(1.0, self.max_risk_adjusted_vorp)
             state[idx] = max(0.0, top_5_avg_value / norm_max_risk_adj); idx += 1
-            # --- End State Replication ---
 
             if idx != self.state_size:
-                 self.logger.error(f"State vector construction size mismatch! Expected {self.state_size}, Got {idx}. Padding.")
-                 # Pad remaining state with zeros if size is incorrect
-                 state[idx:] = 0.0
-                 if len(state) != self.state_size: # Check padding result
-                      state = np.resize(state, self.state_size) # Force resize if padding failed somehow
+                self.logger.error(f"State vector construction size mismatch! Expected {self.state_size}, Got {idx}. Padding.")
+                # Pad remaining state with zeros if size is incorrect
+                state[idx:] = 0.0
+                if len(state) != self.state_size: # Check padding result
+                    state = np.resize(state, self.state_size) # Force resize if padding failed somehow
 
             state = np.nan_to_num(state, nan=0.0, posinf=1.0, neginf=0.0)
             state = np.clip(state, 0.0, 1.0)
@@ -431,8 +419,8 @@ class DraftManager:
         agent_roster = self.teams_rosters.get(self.agent_team_id, [])
         agent_pos_counts = {'QB': 0, 'RB': 0, 'WR': 0, 'TE': 0}
         for p in agent_roster:
-             pos = p.get('position');
-             if pos in agent_pos_counts: agent_pos_counts[pos] += 1
+            pos = p.get('position');
+            if pos in agent_pos_counts: agent_pos_counts[pos] += 1
 
         current_available = self.get_available_players(limit=None) # Get all, sorted by risk_adj_vorp
         if current_available.empty:
@@ -467,17 +455,17 @@ class DraftManager:
             pos = player_row['position']
             fits_limit = True
             if pos in self.max_pos_counts:
-                 if agent_pos_counts.get(pos, 0) >= self.max_pos_counts[pos]:
-                      fits_limit = False
+                if agent_pos_counts.get(pos, 0) >= self.max_pos_counts[pos]:
+                    fits_limit = False
             elif action in [ACTION_BEST_QB, ACTION_BEST_RB, ACTION_BEST_WR, ACTION_BEST_TE]:
                 fits_limit = False # Don't pick K/DEF for specific pos action
 
             if fits_limit:
-                 # Add relevant info for display
-                 player_info = player_row.to_dict()
-                 valid_candidates_list.append(player_info)
-                 if len(valid_candidates_list) >= top_n:
-                     break # Stop once we have enough
+                # Add relevant info for display
+                player_info = player_row.to_dict()
+                valid_candidates_list.append(player_info)
+                if len(valid_candidates_list) >= top_n:
+                    break # Stop once we have enough
 
         if not valid_candidates_list and action != ACTION_BEST_AVAILABLE:
             # If original action yielded no *valid* candidates, try BPA
@@ -566,7 +554,7 @@ class DraftManager:
 
         return needs, opp_pos_counts, num_flex_op_needed
 
-    # --- Opponent Target Prediction (Placeholder - More Complex Logic Needed) ---
+    # --- Opponent Target Prediction (Rough aprox) ---
     def predict_opponent_targets(self, team_id, num_targets=5):
         """
         Predicts players the specified opponent might target next.
@@ -596,12 +584,12 @@ class DraftManager:
             is_op = player_pos in ['QB','RB','WR','TE'] and self.has_op_slot
 
             if player_pos in temp_needs and temp_needs[player_pos] > 0:
-                 bonus = OPPONENT_NEED_BONUS_FACTOR # Simplified constant name
-                 temp_needs[player_pos] -= 1
+                bonus = OPPONENT_NEED_BONUS_FACTOR 
+                temp_needs[player_pos] -= 1
             elif (flex_op_needed - temp_flex_filled) > 0:
-                 if is_op and player_pos == 'QB': bonus = 1.4; temp_flex_filled += 1 # Simplified bonuses
-                 elif is_op: bonus = 1.3; temp_flex_filled += 1
-                 elif is_flex: bonus = 1.2; temp_flex_filled += 1
+                if is_op and player_pos == 'QB': bonus = 1.4; temp_flex_filled += 1 # Simplified bonuses
+                elif is_op: bonus = 1.3; temp_flex_filled += 1
+                elif is_flex: bonus = 1.2; temp_flex_filled += 1
 
             candidates_df.loc[index, 'adjusted_score'] = base_score * bonus
 
@@ -613,13 +601,13 @@ class DraftManager:
             pos = player_row['position']
             fits_limit = True
             if pos in self.max_pos_counts:
-                 if counts.get(pos, 0) >= self.max_pos_counts[pos]:
-                      fits_limit = False
+                if counts.get(pos, 0) >= self.max_pos_counts[pos]:
+                    fits_limit = False
 
             if fits_limit:
-                 potential_targets.append(player_row.to_dict())
-                 if len(potential_targets) >= num_targets:
-                     break
+                potential_targets.append(player_row.to_dict())
+                if len(potential_targets) >= num_targets:
+                    break
 
         self.logger.debug(f"Predicted {len(potential_targets)} targets for Team {team_id}.")
         return potential_targets

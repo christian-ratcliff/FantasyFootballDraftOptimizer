@@ -75,7 +75,7 @@ class FantasyFootballAnalyzer:
         print(f"Loading seasonal data for years: {year_list}")
         seasonal_data = nfl.import_seasonal_data(year_list)
         
-        # Get weekly stats for more granular analysis
+        # Get weekly stats
         print(f"Loading weekly data for years: {year_list}")
         weekly_data = nfl.import_weekly_data(year_list)
         
@@ -86,7 +86,7 @@ class FantasyFootballAnalyzer:
         # Merge player names from ID mapping
         seasonal_data = pd.merge(
             seasonal_data,
-            player_ids[['gsis_id', 'name', 'position']],  # Make sure position is included
+            player_ids[['gsis_id', 'name', 'position']],
             left_on='player_id',
             right_on='gsis_id',
             how='left'
@@ -121,7 +121,7 @@ class FantasyFootballAnalyzer:
             # Merge player names from ID mapping
             seasonal_data = pd.merge(
                 seasonal_data,
-                player_ids[['gsis_id', 'name', 'position']],  # Make sure position is included
+                player_ids[['gsis_id', 'name', 'position']],
                 left_on='player_id',
                 right_on='gsis_id',
                 how='left'
@@ -132,7 +132,7 @@ class FantasyFootballAnalyzer:
         except Exception as e:
             print(f"Could not load seasonal data: {e}")
         
-        # Get NGS data for additional insights
+        # Get NGS data
         try:
             passing_data = nfl.import_ngs_data('passing', [self.year])
             rushing_data = nfl.import_ngs_data('rushing', [self.year])
@@ -231,7 +231,7 @@ class FantasyFootballAnalyzer:
         
         plt.show()
         
-        # Look at correlations
+        # correlations
         if len(key_stats) > 1:
             corr_data = seasonal_data[key_stats].corr()
             plt.figure(figsize=(10, 8))
@@ -259,11 +259,10 @@ class FantasyFootballAnalyzer:
         if scoring_format is None:
             scoring_format = self.scoring_format
         
-        # Deep copy to avoid modifying original
+        # avoid modifying original
         result = data.copy()
         
         # Standard scoring mappings - extend this as needed based on league settings
-        # This is a simplified version for demonstration
         result['calculated_points'] = 0
         
         # Passing points
@@ -364,8 +363,8 @@ class FantasyFootballAnalyzer:
         for df in [train_data, test_data]:
             # Create features for modeling - normalize by games played
             for col in ['passing_yards', 'passing_tds', 'interceptions',
-                       'rushing_yards', 'rushing_tds', 'receptions', 'targets', 
-                       'receiving_yards', 'receiving_tds']:
+                        'rushing_yards', 'rushing_tds', 'receptions', 'targets', 
+                        'receiving_yards', 'receiving_tds']:
                 if col in df.columns:
                     df[f'{col}_per_game'] = df[col] / df['games'].clip(lower=1)
             

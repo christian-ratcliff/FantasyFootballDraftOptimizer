@@ -24,12 +24,12 @@ clustering:
 
 # --- Player Projection Model Configuration ---
 projections:
-  projection_year: 2024        # The year the projections are *for*
+  projection_year: 2024       # The year the projections are *for*
   use_do_not_draft: true       # Apply 'do_not_draft' flags (zeros out projections)
-  use_hierarchical: false      # Use hierarchical component models (True) or direct model (False)
-  model_type: "xgboost"        # Algorithm: 'random_forest', 'gradient_boosting', 'xgboost', 'lightgbm'
+  use_hierarchical: false     # Use hierarchical component models (True) or direct model (False) DOESNT WORK
+  model_type: "xgboost"        # Algorithm: 'random_forest', 'gradient_boosting', 'xgboost', 'lightgbm' ONLY XGBOOST WORKS
   optimize_hyperparams: true  # Use Optuna for projection model HPO (takes longer)
-  feature_selection_method: "shap" # Method: 'importance', 'rfe', 'rfecv', 'lasso', 'shap'
+  feature_selection_method: "shap" # Method: 'importance', 'rfe', 'rfecv', 'lasso', 'shap' ONLY SHAP WORKS REALLY
   prioritize_ngs: true         # Give higher priority to NGS features during selection
 
 # --- Caching Options ---
@@ -44,7 +44,7 @@ models_loading:
 
 # --- Reinforcement Learning (RL) Draft Agent Training ---
 rl_training:
-  enabled: false             # Run main RL training/eval for projection_year
+  enabled: false           # Run main RL training/eval for projection_year
   agent_draft_position: 5      # Simulates the agent drafting from this slot (1-based index)
   final_training_timesteps: 1024000 # Timesteps for the FINAL training run (e.g., 1M+)
   model_save_path: "ppo_fantasy_draft_agent" # Base name for saving main model
@@ -52,15 +52,15 @@ rl_training:
 
   # --- PPO Hyperparameters (Defaults for FINAL run, or starting point for Optuna) ---
   ppo_hyperparams:
-    learning_rate: 3.0e-4    # Example: Start with a potentially better tuned LR
-    n_steps: 2048
-    batch_size: 128        # Example: Start with a potentially better tuned BS
+    learning_rate: 3.0e-4    
+    n_steps: 4096
+    batch_size: 128        
     n_epochs: 10
     gamma: 0.995
     gae_lambda: 0.95
     clip_range: 0.2
     ent_coef: 0.01
-    vf_coef: 0.75            # Example: Start with a potentially better tuned VC
+    vf_coef: 0.75            
     max_grad_norm: 0.5
     # Policy network architecture
     policy_kwargs:
@@ -70,17 +70,17 @@ rl_training:
 
   # --- Optuna Hyperparameter Optimization (for PPO) ---
   optuna:
-    enabled: true    # Set true to run Optuna HPO *before* final training
-    n_trials: 100              # Number of Optuna trials
+    enabled: false    # Set true to run Optuna HPO *before* final training
+    n_trials: 150              # Number of Optuna trials
     trial_timesteps: 65536   # Timesteps per Optuna trial
     timeout_seconds: 86400    #How long to run trials before it kills itself
     n_jobs: 5               # How many processes to spin up (set to -1 to use all of your computers available)
-    # Define parameter search spaces (adjust ranges as needed)
+    # Parameter search spaces 
     search_space:
       learning_rate:
         type: 'loguniform'
         low: 1.0e-5
-        high: 1.0e-3
+        high: 1.0e-1
       n_steps:
         type: 'categorical'
         choices: [1024, 2048, 4096]
@@ -90,7 +90,7 @@ rl_training:
       n_epochs:
         type: 'int'
         low: 5
-        high: 20
+        high: 30
       gamma:
         type: 'uniform'
         low: 0.98
@@ -106,7 +106,7 @@ rl_training:
       vf_coef:
         type: 'uniform'
         low: 0.3
-        high: 0.9 # Allow higher values
+        high: 0.95 # Allow higher values
       # --- Optional: Tuning Network Architecture
       policy_kwargs_net_arch:
         type: 'categorical'
@@ -129,20 +129,19 @@ rl_training:
 
 # --- Visualization Options ---
 visualizations:
-  enabled: true              # Generate plots (excluding RL custom plot if PlottingCallback removed)
-
+  enabled: true              # Generate plots 
 # --- Evaluation Options ---
 evaluation:
-  enabled: true                # Evaluate projection models against past actuals
+  enabled: false               # Evaluate projection models against past actuals
 
 # --- File Paths ---
 paths:
   config_path: 'configs/league_settings.json'
-  data_dir: 'data_testing'
-  raw_dir: 'data_testing/raw'
-  processed_dir: 'data_testing/processed'
-  output_dir: 'data_testing/outputs'
-  models_dir: 'data_testing/models'
+  data_dir: 'data'
+  raw_dir: 'data/raw'
+  processed_dir: 'data/processed'
+  output_dir: 'data/outputs'
+  models_dir: 'data/models'
 
 # --- Logging Configuration ---
 logging:

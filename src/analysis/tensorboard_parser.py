@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np # For checking finite values
 
-# Try importing tbparse, handle if not installed
 try:
     import tbparse
     TBPARSE_AVAILABLE = True
@@ -15,7 +14,7 @@ except ImportError:
     TBPARSE_AVAILABLE = False
     logging.getLogger("fantasy_football").error("tbparse not installed. Run 'pip install tbparse' to enable TensorBoard log parsing.")
 
-logger = logging.getLogger("fantasy_football") # Use main logger or specific analysis logger
+logger = logging.getLogger("fantasy_football") 
 
 def process_and_plot_tb_data(log_dir, output_csv_path="training_data.csv", output_plot_path="training_plots_combined.png"):
     """
@@ -51,7 +50,6 @@ def process_and_plot_tb_data(log_dir, output_csv_path="training_data.csv", outpu
         df.rename(columns={'step': 'Timesteps', 'tag': 'Metric', 'value': 'Value'}, inplace=True)
 
         # --- Data Cleaning & Filtering ---
-        # Remove non-finite values that might cause plotting issues
         initial_rows = len(df)
         df = df[np.isfinite(df['Value'])]
         if len(df) < initial_rows:
@@ -68,7 +66,7 @@ def process_and_plot_tb_data(log_dir, output_csv_path="training_data.csv", outpu
                     'train/clip_fraction',
                     'train/explained_variance',
                 ]
-        # Optional: Filter specific metrics if needed
+        # Filter specific metrics
         df = df[df['Metric'].isin(metrics_to_keep)].copy()
 
         # --- Save to CSV ---
@@ -81,7 +79,7 @@ def process_and_plot_tb_data(log_dir, output_csv_path="training_data.csv", outpu
             logger.error(f"Failed to save TensorBoard data to CSV: {e}", exc_info=True)
 
 
-        # --- Custom Plotting ---
+        # --- Plotting ---
         metrics = sorted(df['Metric'].unique()) # Get unique metrics sorted alphabetically
         if not metrics:
             logger.warning("No metrics found in DataFrame after processing.")

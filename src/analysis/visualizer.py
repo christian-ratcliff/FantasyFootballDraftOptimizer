@@ -60,9 +60,9 @@ class FantasyDataVisualizer:
         
         # Custom color maps for heatmaps and clusters
         self.cmap_red_blue = LinearSegmentedColormap.from_list("red_blue", 
-                                                             ["#ef8a62", "#f7f7f7", "#67a9cf"])
+                                                            ["#ef8a62", "#f7f7f7", "#67a9cf"])
         
-        # Fixed colors for clusters (consistent across visualizations)
+        # Fixed colors for clusters 
         self.cluster_colors = {
             'Elite': '#1f77b4',       # blue
             'High Tier': '#2ca02c',   # green
@@ -170,7 +170,7 @@ class FantasyDataVisualizer:
                 # Add values to the end of each bar
                 for i, (abbr, value) in enumerate(zip(abbrs, points)):
                     plt.text(value + (0.01 * max(points) if value >= 0 else -0.01 * max(points)),
-                           i, f' {value}', va='center')
+                        i, f' {value}', va='center')
                 
                 # Add title and labels
                 league_name = league_info.get('name', 'League')
@@ -364,8 +364,8 @@ class FantasyDataVisualizer:
             if pos in filtered_data['position'].values:
                 avg = filtered_data[filtered_data['position'] == pos]['fantasy_points'].mean()
                 ax.text(i, avg + 2, f"Avg: {avg:.1f}", ha='center', 
-                      color='black', fontweight='bold', 
-                      bbox=dict(facecolor='white', alpha=0.8, edgecolor='lightgray'))
+                    color='black', fontweight='bold', 
+                    bbox=dict(facecolor='white', alpha=0.8, edgecolor='lightgray'))
         
         plt.tight_layout()
         plt.savefig(os.path.join(dist_dir, 'fantasy_points_violin.png'))
@@ -376,7 +376,7 @@ class FantasyDataVisualizer:
         
         # Create box plot
         ax = sns.boxplot(x='position', y='fantasy_points', data=filtered_data,
-                      palette=self.positions_palette, showfliers=False)
+                    palette=self.positions_palette, showfliers=False)
         
         # Add swarm plot for individual points
         sns.swarmplot(x='position', y='fantasy_points', data=filtered_data, 
@@ -398,8 +398,8 @@ class FantasyDataVisualizer:
             if pos in filtered_data['position'].values:
                 pos_data = filtered_data[filtered_data['position'] == pos]
                 sns.kdeplot(pos_data['fantasy_points'], label=pos, 
-                          color=self.positions_palette.get(pos), 
-                          fill=True, alpha=0.3)
+                        color=self.positions_palette.get(pos), 
+                        fill=True, alpha=0.3)
         
         # Add title and labels
         plt.title('Fantasy Points Density by Position', fontsize=16, pad=20)
@@ -444,8 +444,8 @@ class FantasyDataVisualizer:
             if pos in filtered_data['position'].values:
                 pos_data = filtered_data[filtered_data['position'] == pos]
                 sns.histplot(pos_data['age'], label=pos, 
-                           color=self.positions_palette.get(pos), 
-                           alpha=0.7, kde=True)
+                        color=self.positions_palette.get(pos), 
+                        alpha=0.7, kde=True)
         
         # Add title and labels
         plt.title('Age Distribution by Position', fontsize=16, pad=20)
@@ -465,7 +465,7 @@ class FantasyDataVisualizer:
         
         # Create box plot
         ax = sns.boxplot(x='position', y='age', data=filtered_data,
-                      palette=self.positions_palette, showfliers=False)
+                    palette=self.positions_palette, showfliers=False)
         
         # Add swarm plot for individual points
         sns.swarmplot(x='position', y='age', data=filtered_data, 
@@ -558,7 +558,7 @@ class FantasyDataVisualizer:
                 # Add stat average as vertical line
                 avg = stat_data.mean()
                 plt.axvline(avg, color='red', linestyle='--', 
-                          label=f'Avg: {avg:.1f}')
+                        label=f'Avg: {avg:.1f}')
                 
                 # Add title and labels
                 plt.title(f'{stat.replace("_", " ").title()} Distribution')
@@ -567,9 +567,9 @@ class FantasyDataVisualizer:
                 plt.legend()
             else:
                 plt.text(0.5, 0.5, f'No data for {stat}', 
-                       ha='center', va='center', 
-                       transform=plt.gca().transAxes,
-                       fontsize=14)
+                    ha='center', va='center', 
+                    transform=plt.gca().transAxes,
+                    fontsize=14)
         
         plt.tight_layout()
         plt.savefig(os.path.join(pos_dir, 'stat_distributions.png'))
@@ -587,7 +587,7 @@ class FantasyDataVisualizer:
                 # Add stat average as vertical line
                 avg = stat_data.mean()
                 plt.axvline(avg, color='red', linestyle='--', 
-                          label=f'Avg: {avg:.1f}')
+                        label=f'Avg: {avg:.1f}')
                 
                 # Add title and labels
                 plt.title(f'{stat.replace("_", " ").title()} Distribution for {position}')
@@ -632,8 +632,8 @@ class FantasyDataVisualizer:
             if pos in filtered_data['position'].values:
                 pos_data = filtered_data[filtered_data['position'] == pos]
                 sns.histplot(pos_data['games'], label=pos, 
-                           color=self.positions_palette.get(pos), 
-                           alpha=0.7, kde=True, discrete=True)
+                        color=self.positions_palette.get(pos), 
+                        alpha=0.7, kde=True, discrete=True)
         
         # Add title and labels
         plt.title('Games Played Distribution by Position', fontsize=16, pad=20)
@@ -663,8 +663,8 @@ class FantasyDataVisualizer:
                     # Only plot if we have enough data points
                     if len(pos_data) > 1:
                         plt.plot(pos_data['seasons_in_league'], pos_data['games'], 
-                               marker='o', label=pos, 
-                               color=self.positions_palette.get(pos))
+                            marker='o', label=pos, 
+                            color=self.positions_palette.get(pos))
             
             # Add title and labels
             plt.title('Average Games Played by Career Length', fontsize=16, pad=20)
@@ -750,8 +750,8 @@ class FantasyDataVisualizer:
             if pos in trend_data['position'].values:
                 pos_data = trend_data[trend_data['position'] == pos]
                 plt.plot(pos_data['season'], pos_data['avg_points'], 
-                       marker='o', label=pos, 
-                       color=self.positions_palette.get(pos))
+                    marker='o', label=pos, 
+                    color=self.positions_palette.get(pos))
         
         # Add title and labels
         plt.title('Average Fantasy Points by Position Over Time', fontsize=16, pad=20)
@@ -776,8 +776,8 @@ class FantasyDataVisualizer:
             if pos in trend_data['position'].values:
                 pos_data = trend_data[trend_data['position'] == pos]
                 plt.plot(pos_data['season'], pos_data['median_points'], 
-                       marker='o', label=pos, 
-                       color=self.positions_palette.get(pos))
+                    marker='o', label=pos, 
+                    color=self.positions_palette.get(pos))
         
         # Add title and labels
         plt.title('Median Fantasy Points by Position Over Time', fontsize=16, pad=20)
@@ -802,8 +802,8 @@ class FantasyDataVisualizer:
             if pos in trend_data['position'].values:
                 pos_data = trend_data[trend_data['position'] == pos]
                 plt.plot(pos_data['season'], pos_data['player_count'], 
-                       marker='o', label=pos, 
-                       color=self.positions_palette.get(pos))
+                    marker='o', label=pos, 
+                    color=self.positions_palette.get(pos))
         
         # Add title and labels
         plt.title('Player Count by Position Over Time', fontsize=16, pad=20)
@@ -829,9 +829,9 @@ class FantasyDataVisualizer:
                 
                 plt.figure(figsize=(10, 6))
                 plt.plot(pos_data['season'], pos_data['avg_points'], marker='o', label='Average', 
-                       color=self.positions_palette.get(pos))
+                    color=self.positions_palette.get(pos))
                 plt.plot(pos_data['season'], pos_data['median_points'], marker='s', linestyle='--', label='Median', 
-                       color=self.positions_palette.get(pos), alpha=0.7)
+                    color=self.positions_palette.get(pos), alpha=0.7)
                 plt.title(f'Fantasy Points Trend for {pos}', fontsize=16, pad=20)
                 plt.xlabel('Season', fontsize=14)
                 plt.ylabel('Fantasy Points', fontsize=14)
@@ -914,7 +914,7 @@ class FantasyDataVisualizer:
             
             # Plot average
             plt.plot(trend_data['season'], trend_data['avg'], 
-                   marker='o', label='Average', color=self.positions_palette.get(position))
+                marker='o', label='Average', color=self.positions_palette.get(position))
             
             # Add confidence interval
             plt.fill_between(
@@ -928,7 +928,7 @@ class FantasyDataVisualizer:
             # Add median
             plt.plot(trend_data['season'], trend_data['median'], 
                    marker='s', linestyle='--', label='Median', 
-                   color=self.positions_palette.get(position), alpha=0.7)
+                color=self.positions_palette.get(position), alpha=0.7)
             
             # Add title and labels
             plt.title(f'{stat_label} Trends for {position}', fontsize=16, pad=20)
@@ -997,8 +997,8 @@ class FantasyDataVisualizer:
                 pos_data = pos_data.sort_values('age')
                 
                 plt.plot(pos_data['age'], pos_data['avg_points'], 
-                       marker='o', label=pos, 
-                       color=self.positions_palette.get(pos))
+                    marker='o', label=pos, 
+                    color=self.positions_palette.get(pos))
                 
                 # Add confidence interval
                 plt.fill_between(
@@ -1035,7 +1035,7 @@ class FantasyDataVisualizer:
                 
                 plt.figure(figsize=(10, 6))
                 plt.plot(pos_data['age'], pos_data['avg_points'], marker='o', 
-                       color=self.positions_palette.get(pos))
+                    color=self.positions_palette.get(pos))
                 
                 # Add confidence interval
                 plt.fill_between(

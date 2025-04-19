@@ -1,7 +1,3 @@
-"""
-Advanced feature engineering for fantasy football prediction
-"""
-
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
@@ -386,15 +382,15 @@ class FantasyFeatureEngineering:
                  df['age_x_rush_pct'] = df['age'] * df['rush_yards_percentage'] # Older rushing QBs?
 
         if 'oline_quality' in df.columns:
-             if 'attempts_per_game' in df.columns:
+            if 'attempts_per_game' in df.columns:
                   df['oline_x_attempts_pg'] = df['oline_quality'] * df['attempts_per_game']
-             if 'epa_per_attempt' in df.columns:
+            if 'epa_per_attempt' in df.columns:
                   df['oline_x_epa_pa'] = df['oline_quality'] * df['epa_per_attempt']
 
         if 'receiver_quality_boost' in df.columns:
-             if 'passing_tds_per_game' in df.columns:
+            if 'passing_tds_per_game' in df.columns:
                   df['rec_quality_x_pass_td_pg'] = df['receiver_quality_boost'] * df['passing_tds_per_game']
-             if 'passing_yards_per_game' in df.columns:
+            if 'passing_yards_per_game' in df.columns:
                   df['rec_quality_x_pass_yd_pg'] = df['receiver_quality_boost'] * df['passing_yards_per_game']
         return df
 
@@ -647,21 +643,21 @@ class FantasyFeatureEngineering:
                  df['age_x_ypc'] = df['age'] * df['yards_per_carry']
 
         if 'career_touches_to_date' in df.columns:
-             if 'yards_per_carry' in df.columns:
+            if 'yards_per_carry' in df.columns:
                   df['careertouch_x_ypc'] = df['career_touches_to_date'] * df['yards_per_carry'] # Mileage effect on efficiency
-             if 'fantasy_points_per_touch' in df.columns:
+            if 'fantasy_points_per_touch' in df.columns:
                   df['careertouch_x_fpts_pt'] = df['career_touches_to_date'] * df['fantasy_points_per_touch']
 
         if 'oline_quality' in df.columns:
-             if 'yards_per_carry' in df.columns:
+            if 'yards_per_carry' in df.columns:
                   df['oline_x_ypc'] = df['oline_quality'] * df['yards_per_carry']
-             if 'rushing_td_rate' in df.columns:
-                   # Ensure rushing_td_rate exists before interaction
-                   if 'rushing_tds' in df.columns and 'carries' in df.columns:
-                       df['rushing_td_rate'] = (df['rushing_tds'] / df['carries'].clip(lower=1)) * 100
-                       df['oline_x_rush_td_rate'] = df['oline_quality'] * df['rushing_td_rate'].fillna(0) # Fill NaNs before multiplying
-                   else:
-                       df['oline_x_rush_td_rate'] = 0 # Or some other default
+            if 'rushing_td_rate' in df.columns:
+                # Ensure rushing_td_rate exists before interaction
+                if 'rushing_tds' in df.columns and 'carries' in df.columns:
+                    df['rushing_td_rate'] = (df['rushing_tds'] / df['carries'].clip(lower=1)) * 100
+                    df['oline_x_rush_td_rate'] = df['oline_quality'] * df['rushing_td_rate'].fillna(0) # Fill NaNs before multiplying
+                else:
+                    df['oline_x_rush_td_rate'] = 0 # Or some other default
         
         return df
 
@@ -860,9 +856,7 @@ class FantasyFeatureEngineering:
                 # Try to estimate QB quality from team passing stats
                 team_stats = pd.DataFrame()
                 if all(col in df.columns for col in ['posteam', 'season']):
-                    # This would require additional team data - we'll use placeholder logic
-                    # that you'd replace with actual team-level passing efficiency metrics
-                    df['qb_quality'] = 0  # Placeholder
+                    df['qb_quality'] = 0  
                     
             # Calculate number of quality receivers on team
             if 'posteam' in df.columns and 'season' in df.columns:
@@ -926,19 +920,19 @@ class FantasyFeatureEngineering:
         
         # Add interaction features
         if 'age' in df.columns:
-             if 'targets_per_game' in df.columns:
+            if 'targets_per_game' in df.columns:
                  df['age_x_targets_pg'] = df['age'] * df['targets_per_game']
-             if 'yards_per_reception' in df.columns:
+            if 'yards_per_reception' in df.columns:
                  df['age_x_ypr'] = df['age'] * df['yards_per_reception']
-             if 'air_yards_share' in df.columns: # Assuming air_yards_share calculation is done first
+            if 'air_yards_share' in df.columns: # Assuming air_yards_share calculation is done first
                  df['age_x_air_yards_share'] = df['age'] * df['air_yards_share']
 
         if 'qb_quality' in df.columns: # Assuming qb_quality is calculated/merged
-             if 'targets_per_game' in df.columns:
+            if 'targets_per_game' in df.columns:
                  df['qb_qual_x_targets_pg'] = df['qb_quality'] * df['targets_per_game']
-             if 'yards_per_target' in df.columns: # Assuming yards_per_target is calculated
+            if 'yards_per_target' in df.columns: # Assuming yards_per_target is calculated
                  df['qb_qual_x_ypt'] = df['qb_quality'] * df['yards_per_target']
-             if 'receiving_td_rate' in df.columns: # Assuming receiving_td_rate is calculated
+            if 'receiving_td_rate' in df.columns: # Assuming receiving_td_rate is calculated
                  df['qb_qual_x_rec_td_rate'] = df['qb_quality'] * df['receiving_td_rate']
 
         if 'target_competition' in df.columns: # Assuming target_competition is calculated
@@ -1374,34 +1368,6 @@ class FantasyFeatureEngineering:
             
             if projection_key in self.feature_sets and not self.feature_sets[projection_key].empty:
                 projection_data_combined.append(self.feature_sets[projection_key])
-        
-        # Combine datasets
-        # Reset index on each DataFrame before concatenation
-        # if train_data_combined:
-        #     # for i, df in enumerate(train_data_combined):
-        #     #     logger.info(f"Before Reset - Train DataFrame {i} index: {df.index.tolist()}")
-
-        #     # Reset index and create a fresh copy
-        #     train_data_reset = [df.reset_index(drop=True).copy() for df in train_data_combined]
-
-        #     # for i, df in enumerate(train_data_reset):
-        #     #     logger.info(f"After Reset - Train DataFrame {i} index: {df.index.tolist()}")
-
-        #     # Now, concatenate safely
-        #     self.feature_sets['train_combined'] = pd.concat(train_data_reset, ignore_index=True, verify_integrity=True)
-        #     logger.info(f"Created combined training set with {len(self.feature_sets['train_combined'])} players")
-
-        # if projection_data_combined:
-        #     # for i, df in enumerate(projection_data_combined):
-        #     #     logger.info(f"Before Reset - Projection DataFrame {i} index: {df.index.tolist()}")
-
-        #     projection_data_reset = [df.reset_index(drop=True).copy() for df in projection_data_combined]
-
-        #     # for i, df in enumerate(projection_data_reset):
-        #     #     logger.info(f"After Reset - Projection DataFrame {i} index: {df.index.tolist()}")
-
-        #     self.feature_sets['projection_combined'] = pd.concat(projection_data_reset, ignore_index=True, verify_integrity=True)
-        #     logger.info(f"Created combined projection set with {len(self.feature_sets['projection_combined'])} players")
 
         train_data_combined = [df[~df.index.duplicated()].reset_index(drop=True) for df in train_data_combined]
         projection_data_combined = [df[~df.index.duplicated()].reset_index(drop=True) for df in projection_data_combined]

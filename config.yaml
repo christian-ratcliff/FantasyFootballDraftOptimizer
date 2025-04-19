@@ -20,7 +20,7 @@ data:
 clustering:
   cluster_count: 5             # Number of player tiers/clusters per position
   drop_bottom_tiers: 1         # How many lowest tiers to potentially filter out
-  use_filtered: false          # Train/project ONLY on players NOT in dropped tiers?
+  use_filtered: false          # Train/project ONLY on players NOT in dropped tiers
 
 # --- Player Projection Model Configuration ---
 projections:

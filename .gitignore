@@ -1,6 +1,6 @@
 .venv
 .vscode
-configs
+
 notebooks
 old
 old_models
@@ -13,6 +13,7 @@ __pycache__
 *.png
 *.csv
 *.json
+!league_settings.json
 events.out.*
 *.joblib
 .DS_STORE
@@ -20,3 +21,9 @@ events.out.*
 *.db
 *.zip
 *.txt
+*.tex
+
+mydata.txt
+myactualconfig.json
+
+extract_values.py

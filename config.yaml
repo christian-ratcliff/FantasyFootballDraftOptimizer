@@ -7,8 +7,8 @@ league:
   id: 697625923                 # Your ESPN fantasy league ID
   year: 2024                    # The season year for analysis and projection
   # ESPN Credentials (required ONLY for private leagues via API)
-  espn_s2: "AECeHAkR7FZuTvVWSEnMRIA29wVeroZhvd7fHHy5tZvIUdIp4XIZaglA17V6g2rulDDFMCUiC%2BpeXNqWzEJTpjTJsz5Zv2DTMOIjeX0JrC6CYs8kDidYeF0HHkI78OG2O%2Bs6f%2FUPVSwXRBZEGMKPDdKl%2BE0a7na225JN4bC80tD9RXFv32kqqtEk%2Bgw1hgQ968ARiAdt69axAvjryW57rj58sYK4oMJPxjtPbh9tATi%2BSI2AmQ0dNPXZfRTA%2FFgCtgzyxWNwbKT2boYeDfFe7rm8idW47lnavsfYGwWjVpddVY6%2BcupF7uoc9AeVFQ5xNUY%3D"
-  swid: "{42614A28-F6F5-4052-A14A-28F6F52052AF}"
+  espn_s2:
+  swid:
 
 # --- Data Loading & Processing ---
 data:
@@ -36,15 +36,15 @@ projections:
 caching:
   use_cached_raw_data: true     # Use data from 'data/raw' if available
   use_cached_processed_data: true # Use data from 'data/processed' if available
-  use_cached_feature_sets: true  # Use feature sets from 'data/processed' if available
+  use_cached_feature_sets: false  # Use feature sets from 'data/processed' if available
 
 # --- Projection Model Loading ---
 models_loading:
-  use_existing_projection_models: true # Load projection models from 'paths.models_dir'?
+  use_existing_projection_models: false # Load projection models from 'paths.models_dir'?
 
 # --- Reinforcement Learning (RL) Draft Agent Training ---
 rl_training:
-  enabled: false           # Run main RL training/eval for projection_year
+  enabled: true           # Run main RL training/eval for projection_year
   agent_draft_position: 5      # Simulates the agent drafting from this slot (1-based index)
   final_training_timesteps: 1024000 # Timesteps for the FINAL training run (e.g., 1M+)
   model_save_path: "ppo_fantasy_draft_agent" # Base name for saving main model
@@ -70,7 +70,7 @@ rl_training:
 
   # --- Optuna Hyperparameter Optimization (for PPO) ---
   optuna:
-    enabled: false    # Set true to run Optuna HPO *before* final training
+    enabled: true    # Set true to run Optuna HPO *before* final training
     n_trials: 150              # Number of Optuna trials
     trial_timesteps: 65536   # Timesteps per Optuna trial
     timeout_seconds: 86400    #How long to run trials before it kills itself
@@ -132,7 +132,7 @@ visualizations:
   enabled: true              # Generate plots 
 # --- Evaluation Options ---
 evaluation:
-  enabled: false               # Evaluate projection models against past actuals
+  enabled: true               # Evaluate projection models against past actuals
 
 # --- File Paths ---
 paths:

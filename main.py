@@ -47,161 +47,6 @@ def load_config(config_path='config.yaml'):
         print(f"ERROR: Error loading config file '{config_path}': {e}")
         sys.exit(1)
 
-# def setup_logging(config):
-#     """
-#     Set up logging based on configuration using dictConfig,
-#     handling multiprocessing by creating separate log files for child processes,
-#     and silencing Optuna logs.
-#     """
-#     log_config = config.get('logging', {})
-#     log_level_file = log_config.get('level', 'INFO').upper() # Level for the file
-#     log_file_base = log_config.get('file', 'fantasy_football.log') # Get base name from config
-#     console_log_level = 'WARNING' # Hardcode console level
-
-#     log_file = None # Final log file path
-#     pid = os.getpid()
-#     is_child_process = False
-
-#     # --- Determine Log Filename Based on Process ---
-#     if log_file_base:
-#         try:
-#             current_process = multiprocessing.current_process()
-#             if current_process.name != 'MainProcess' or 'PoolWorker' in current_process.name or 'Fork' in current_process.name or 'Spawn' in current_process.name:
-#                  is_child_process = True
-
-#             if is_child_process:
-#                 base, ext = os.path.splitext(log_file_base)
-#                 log_file = f"{base}_pid{pid}{ext}"
-#                 print(f"INFO: setup_logging - Child process detected (PID {pid}, Name: {current_process.name}), using separate log file: {log_file}")
-#             else:
-#                 log_file = log_file_base
-#                 print(f"INFO: setup_logging - Main process (PID {pid}, Name: {current_process.name}), using primary log file: {log_file}")
-
-#         except Exception as e:
-#              print(f"WARNING: setup_logging - Could not determine child process status ({e}), using base log file: {log_file_base}")
-#              log_file = log_file_base
-
-#     # --- Prepare File Handler Info ---
-#     file_handler_config = None
-#     if log_file:
-#         log_dir = os.path.dirname(log_file)
-#         if log_dir and not os.path.exists(log_dir):
-#             try:
-#                 os.makedirs(log_dir)
-#                 print(f"INFO: setup_logging - Created log directory: {log_dir}")
-#             except OSError as e:
-#                 log_file = None
-#                 print(f"ERROR: setup_logging - Creating log dir '{log_dir}' failed: {e}. Disabling file log.")
-
-#         if log_file:
-#              write_target_dir = os.path.dirname(log_file) if os.path.dirname(log_file) else '.'
-#              if not os.access(write_target_dir, os.W_OK):
-#                  log_file = None
-#                  print(f"ERROR: setup_logging - Cannot write to log directory '{write_target_dir}'. Disabling file log.")
-
-#         if log_file:
-#             file_handler_config = {
-#                 'level': log_level_file,
-#                 'class': 'logging.FileHandler',
-#                 'formatter': 'standard',
-#                 'filename': log_file,
-#                 'mode': 'a',
-#             }
-#     else:
-#          print("INFO: setup_logging - File logging disabled.")
-
-
-#     # --- Define Logging Configuration Dictionary ---
-#     logging_dict = {
-#         'version': 1,
-#         'disable_existing_loggers': False,
-#         'formatters': {
-#             'standard': {
-#                 'format': '%(asctime)s - %(process)d - %(name)s - %(levelname)s - %(message)s',
-#                 'datefmt': '%Y-%m-%d %H:%M:%S',
-#             },
-#         },
-#         'handlers': {
-#             'console': {
-#                 'level': console_log_level,
-#                 'class': 'logging.StreamHandler',
-#                 'formatter': 'standard',
-#                 'stream': sys.stdout,
-#             },
-#             **({'file': file_handler_config} if file_handler_config else {}),
-#             'null': {
-#                 'class': 'logging.NullHandler',
-#             },
-#         },
-#         'loggers': {
-#             'fantasy_football': {
-#                 'handlers': ['console'] + (['file'] if file_handler_config else []),
-#                 'level': log_level_file,
-#                 'propagate': False,
-#             },
-#             'fantasy_draft_rl': {
-#                 'handlers': ['console'] + (['file'] if file_handler_config else []),
-#                 'level': log_level_file,
-#                 'propagate': False,
-#             },
-#              'nfl_data_py': {'level': 'WARNING', 'propagate': False, 'handlers': ['console'] + (['file'] if file_handler_config else [])},
-#              'matplotlib': {'level': 'WARNING', 'propagate': False, 'handlers': ['console'] + (['file'] if file_handler_config else [])},
-#              'stable_baselines3': {'level': 'WARNING', 'propagate': False, 'handlers': ['console'] + (['file'] if file_handler_config else [])},
-#              'joblib': {'level': 'WARNING', 'propagate': False, 'handlers': ['console'] + (['file'] if file_handler_config else [])},
-#              # Configure Optuna logger - will use 'null' handler if OPTUNA_AVAILABLE is False
-#              'optuna': {
-#                   'handlers': ['null'], # Always send to null initially
-#                   'level': 'CRITICAL', # Set level high
-#                   'propagate': False,
-#              },
-#         },
-#         'root': {
-#             'level': 'CRITICAL',
-#             'handlers': [],
-#         }
-#     }
-
-#     # --- Apply dictConfig ---
-#     try:
-#         logging.config.dictConfig(logging_dict)
-#         final_log_file_path = log_file if file_handler_config else "Disabled"
-#         print(f"INFO: setup_logging - Initial logging config applied. Console: {console_log_level}, File: {log_level_file}, Log File: {final_log_file_path} (PID: {pid})")
-#     except Exception as e:
-#         print(f"FATAL: setup_logging - Failed to configure logging using dictConfig: {e}")
-#         logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
-#         logging.error("Logging configuration failed, using basic WARNING level output.")
-#         return logging.getLogger("fantasy_football")
-
-
-#     # --- Apply Optuna-specific logging controls AFTER dictConfig ---
-#     # Now OPTUNA_AVAILABLE is defined within this function's scope
-#     if OPTUNA_AVAILABLE and optuna:
-#         try:
-#             optuna.logging.disable_default_handler()
-#             print("INFO: setup_logging - Disabled Optuna's default logging handler.")
-#             optuna.logging.set_verbosity(optuna.logging.CRITICAL)
-#             print("INFO: setup_logging - Set Optuna's internal verbosity to CRITICAL.")
-
-#             optuna_logger = logging.getLogger("optuna")
-#             for handler in optuna_logger.handlers[:]:
-#                 optuna_logger.removeHandler(handler)
-#             optuna_logger.addHandler(logging.NullHandler())
-#             optuna_logger.setLevel(logging.CRITICAL)
-#             optuna_logger.propagate = False
-#             print(f"INFO: setup_logging - Optuna logger explicitly configured to discard messages.")
-
-#         except Exception as e:
-#             print(f"WARNING: setup_logging - Could not apply Optuna-specific logging controls: {e}")
-
-#     # Return the main application logger instance
-#     logger = logging.getLogger("fantasy_football")
-#     logger.debug(f"Setup Logging: DEBUG message test (PID {pid}, File only if level=DEBUG)")
-#     logger.info(f"--- Logging setup complete (PID {pid}) ---")
-#     logger.warning(f"--- Logging setup complete (PID {pid} - WARNING test) ---")
-
-#     return logger
-
-
 def setup_logging(config):
     """
     Set up logging based on configuration using dictConfig.
@@ -349,7 +194,7 @@ def main():
     logger = setup_logging(config)
     logger.info("===== Starting Fantasy Football System =====")
 
-    # --- (Projection Pipeline logic as before) ---
+    # --- (Projection Pipeline) ---
     logger.info("--- Running Main Projection Pipeline ---")
     main_projections = None; projection_pipeline = None
     try:
@@ -400,19 +245,6 @@ def main():
 
             logger.info(f"--- Finished Main RL Run ---")
         except Exception as e: logger.exception("Main RL Pipeline failed.")
-
-        # # --- Generate Plots from TensorBoard Data ---
-        # # Check if the parser is available and we have a log directory
-        # if TB_PARSER_AVAILABLE and tensorboard_log_dir and os.path.isdir(tensorboard_log_dir):
-        #     output_dir = config.get('paths', {}).get('output_dir', 'data/outputs')
-        #     csv_path = os.path.join(output_dir, "rl_training_data_from_tb.csv")
-        #     plot_path = os.path.join(output_dir, "rl_training_plots_from_tb.png")
-        #     logger.info("Attempting to process TensorBoard logs for custom plotting...")
-        #     process_and_plot_tb_data(tensorboard_log_dir, csv_path, plot_path)
-        # elif not TB_PARSER_AVAILABLE:
-        #     logger.warning("Skipping TB plot generation: tbparse not available.")
-        # else:
-        #     logger.warning(f"Skipping TB plot generation: Log directory not found or invalid: {tensorboard_log_dir}")
 
     elif run_main_rl and (not RL_AVAILABLE or rl_pipeline_class is None):
         logger.warning("RL training enabled, but dependencies missing or class failed import.")

@@ -58,7 +58,7 @@ This project implements a sophisticated system for optimizing fantasy football d
     ```
 2.  **Python Environment:** Use Python 3.10. Create and activate a virtual environment:
     ```bash
-    python -m venv .venv
+    python3.10 -m venv .venv
     source .venv/bin/activate  # Linux/macOS
     # .venv\Scripts\activate    # Windows
     ```
